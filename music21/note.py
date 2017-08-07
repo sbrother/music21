@@ -900,6 +900,7 @@ class Note(NotRest):
     # Accepts an argument for pitch
     def __init__(self, *arguments, **keywords):
         NotRest.__init__(self, **keywords)
+        self.uuid = None
         if len(arguments) > 0:
             if isinstance(arguments[0], pitch.Pitch):
                 self.pitch = arguments[0]

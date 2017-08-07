@@ -2025,6 +2025,7 @@ class Note(MusicXMLElement):
         self._attr['print-spacing'] = None # may be yes or no
         self._attr['pizzicato'] = None # may be yes or no -- duplicates somewhat the sound pizzicato attribute
         self._attr['default-x'] = None # X positioning
+        self._attr['uuid'] = None # UUID
 
         # simple elements
         self.chord = False # boolean, default is false

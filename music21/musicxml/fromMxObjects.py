@@ -20,6 +20,7 @@ import copy
 import pprint
 import traceback
 import unittest
+import sys
 
 from music21.musicxml import mxObjects
 
@@ -57,7 +58,6 @@ from music21 import tie
 from music21 import environment
 _MOD = "musicxml.fromMxObjects"
 environLocal = environment.Environment(_MOD)
-
 
 
 #-------------------------------------------------------------------------------
@@ -1686,11 +1686,15 @@ def mxToChord(mxNoteList, inputM21=None, spannerBundle=None):
     ties = [] # store equally spaced list; use None if not defined
     noteheads = [] # store notehead attributes that correspond with pitches
     stemDirs = [] # store stem direction attributes that correspond with pitches
+    uuids = []
 
     for mxNote in mxNoteList:
         # extract pitch pbjects     
         p = mxToPitch(mxNote)
         pitches.append(p)
+        # extract note uuids
+        u = mxNote.get('uuid')
+        uuids.append(u)
         #extract notehead objects; may be None
         nh = mxNote.get('noteheadObj')
         noteheads.append(nh)
@@ -1709,6 +1713,7 @@ def mxToChord(mxNoteList, inputM21=None, spannerBundle=None):
     # set beams from first note of chord
     beamsObj = mxToBeams(mxNoteList[0].beamList)
     c.beams = beamsObj
+    c.uuids = uuids
 
     # set ties based on pitches
     for i, t in enumerate(ties):
@@ -1783,6 +1788,10 @@ def mxToNote(mxNote, spannerBundle=None, inputM21=None):
     mxGrace = mxNote.get('graceObj')
 
     mxToPitch(mxNote, n.pitch) # required info will be taken from entire note
+    
+    mxuuid = mxNote.get('uuid')
+    if mxuuid is not None:
+        n.uuid = mxuuid
 
     if mxGrace is not None:
         #environLocal.printDebug(['mxGrace', mxGrace, mxNote, n.duration])
@@ -1973,7 +1982,6 @@ def mxToMeasure(mxMeasure, spannerBundle=None, inputM21=None, lastMeasureInfo=No
         m = stream.Measure()
     else:
         m = inputM21
-
     # staff assignments: can create a dictionary with components in each
     # staff; this dictionary will then be used to copy this measure and 
     # split components between two parts of more than one staff is defined
