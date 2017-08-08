@@ -1055,6 +1055,7 @@ class Note(NotRest):
     # Accepts an argument for pitch
     def __init__(self, *arguments, **keywords):
         super(Note, self).__init__(**keywords)
+        self.uuid = None
         if arguments:
             if isinstance(arguments[0], pitch.Pitch):
                 self.pitch = arguments[0]

@@ -2139,9 +2139,13 @@ class MeasureParser(XMLParserBase):
         'diamond'
         '''
         notes = []
+        uuids = []
         for mxNote in mxNoteList:
-            notes.append(self.xmlToSimpleNote(mxNote, freeSpanners=False))
+            note = self.xmlToSimpleNote(mxNote, freeSpanners=False)
+            notes.append(note)
+            uuids.append(note.uuid)
         c = chord.Chord(notes)
+        c.uuids = uuids
         
         # move beams from first note -- TODO: what else should be moved?
         if notes:
@@ -2209,6 +2213,7 @@ class MeasureParser(XMLParserBase):
         n = note.Note()
 
         self.xmlToPitch(mxNote, n.pitch) # send whole note since accidental display not in <pitch>
+        n.uuid = mxNote.get('uuid')
 
         beamList = mxNote.findall('beam')
         if beamList:
