@@ -18,13 +18,12 @@ Mostly, these functions are for advanced, low level usage.
 For basic importing of ABC files from a file or URL to a
 :class:`~music21.stream.Stream`, use the music21 converter
 module's :func:`~music21.converter.parse` function.
-
-
 '''
 
 import copy
 import unittest
 
+from music21 import clef
 from music21 import common
 from music21 import environment
 from music21 import exceptions21
@@ -80,7 +79,8 @@ def abcToStreamPart(abcHandler, inputM21=None, spannerBundle=None):
     else:
         useMeasures = True
 
-    # each unit in merged handlers defines possible a Measure (w/ or w/o metadata), trailing meta data, or a single collection of metadata and note data
+    # each unit in merged handlers defines possible a Measure (w/ or w/o metadata),
+    # trailing meta data, or a single collection of metadata and note data
 
     barCount = 0
     measureNumber = 1
@@ -88,10 +88,12 @@ def abcToStreamPart(abcHandler, inputM21=None, spannerBundle=None):
 
     for mh in mergedHandlers:
         # if use measures and the handler has notes; otherwise add to part
-        #environLocal.printDebug(['abcToStreamPart', 'handler', 'left:', mh.leftBarToken, 'right:', mh.rightBarToken, 'len(mh)', len(mh)])
+        #environLocal.printDebug(['abcToStreamPart', 'handler', 'left:', mh.leftBarToken,
+        #    'right:', mh.rightBarToken, 'len(mh)', len(mh)])
 
         if useMeasures and mh.hasNotes():
-            #environLocal.printDebug(['abcToStreamPart', 'useMeasures', useMeasures, 'mh.hasNotes()', mh.hasNotes()])
+            #environLocal.printDebug(['abcToStreamPart', 'useMeasures',
+            #    useMeasures, 'mh.hasNotes()', mh.hasNotes()])
             dst = stream.Measure()
             # bar tokens are already extracted form token list and are available
             # as attributes on the handler object
@@ -100,15 +102,16 @@ def abcToStreamPart(abcHandler, inputM21=None, spannerBundle=None):
             if mh.leftBarToken is not None:
                 # this may be Repeat Bar subclass
                 bLeft = mh.leftBarToken.getBarObject()
-                if bLeft != None:
+                if bLeft is not None:
                     dst.leftBarline = bLeft
                 if mh.leftBarToken.isRepeatBracket():
                     # get any open spanners of RepeatBracket type
-                    rbSpanners = spannerBundle.getByClass('RepeatBracket').getByCompleteStatus(False)
+                    rbSpanners = spannerBundle.getByClass('RepeatBracket'
+                                        ).getByCompleteStatus(False)
                     # this indication is most likely an opening, as ABC does
                     # not encode second ending ending boundaries
                     # we can still check thought:
-                    if len(rbSpanners) == 0:
+                    if not rbSpanners:
                         # add this measure as a componnt
                         rb = spanner.RepeatBracket(dst)
                         # set number, returned here
@@ -127,7 +130,7 @@ def abcToStreamPart(abcHandler, inputM21=None, spannerBundle=None):
 
             if mh.rightBarToken is not None:
                 bRight = mh.rightBarToken.getBarObject()
-                if bRight != None:
+                if bRight is not None:
                     dst.rightBarline = bRight
                 # above returns bars and repeats; we need to look if we just
                 # have repeats
@@ -136,8 +139,9 @@ def abcToStreamPart(abcHandler, inputM21=None, spannerBundle=None):
                     # bracket is open (even if just assigned above) we need
                     # to close it now.
                     # presently, now r bar conditions start a repeat bracket
-                    rbSpanners = spannerBundle.getByClass('RepeatBracket').getByCompleteStatus(False)
-                    if len(rbSpanners) > 0:
+                    rbSpanners = spannerBundle.getByClass(
+                                        'RepeatBracket').getByCompleteStatus(False)
+                    if any(rbSpanners):
                         rb = rbSpanners[0] # get RepeatBracket
                         rb.addSpannedElements(dst)
                         rb.completeStatus = True
@@ -149,7 +153,7 @@ def abcToStreamPart(abcHandler, inputM21=None, spannerBundle=None):
 
         #environLocal.printDebug([mh, 'dst', dst])
         #ql = 0 # might not be zero if there is a pickup
-        
+
         postTransposition, clefSet = parseTokens(mh, dst, p, useMeasures)
 
         # append measure to part; in the case of trailing meta data
@@ -159,16 +163,18 @@ def abcToStreamPart(abcHandler, inputM21=None, spannerBundle=None):
             # must have a time signature in this bar, or defined recently
             # could use getTimeSignatures() on Stream
 
-            if barCount == 1 and dst.timeSignature != None: # easy case
+            if barCount == 1 and dst.timeSignature is not None: # easy case
                 # can only do this b/c ts is defined
                 if dst.barDurationProportion() < 1.0:
                     dst.padAsAnacrusis()
                     dst.number = 0
-                    #environLocal.printDebug(['incompletely filled Measure found on abc import; interpreting as a anacrusis:', 'padingLeft:', dst.paddingLeft])
+                    #environLocal.printDebug([
+                    #    'incompletely filled Measure found on abc import; ',
+                    #    'interpreting as a anacrusis:', 'padingLeft:', dst.paddingLeft])
             else:
                 dst.number = measureNumber
                 measureNumber += 1
-            p._appendCore(dst)
+            p.coreAppend(dst)
 
     try:
         reBar(p, inPlace=True)
@@ -176,36 +182,38 @@ def abcToStreamPart(abcHandler, inputM21=None, spannerBundle=None):
         pass
     # clefs are not typically defined, but if so, are set to the first measure
     # following the meta data, or in the open stream
-    if not clefSet:
+    if not clefSet and not p.recurse().getElementsByClass('Clef'):
         if useMeasures:  # assume at start of measures
-            p.getElementsByClass('Measure')[0].clef = p.flat.bestClef()
+            p.getElementsByClass('Measure')[0].clef = clef.bestClef(p, recurse=True)
         else:
-            p._insertCore(0, p.bestClef())
+            p.coreInsert(0, clef.bestClef(p, recurse=True))
 
     if postTransposition != 0:
         p.transpose(postTransposition, inPlace=True)
 
-    if useMeasures and len(p.flat.getTimeSignatures(searchContext=False,
-            returnDefault=False)) > 0:
+    if useMeasures and p.recurse().getElementsByClass('TimeSignature'):
         # call make beams for now; later, import beams
         #environLocal.printDebug(['abcToStreamPart: calling makeBeams'])
         try:
             p.makeBeams(inPlace=True)
-        except meter.MeterException as e:
+        except (meter.MeterException, stream.StreamException) as e:
             environLocal.warn("Error in beaming...ignoring: %s" % str(e))
 
     # copy spanners into topmost container; here, a part
     rm = []
     for sp in spannerBundle.getByCompleteStatus(True):
-        p._insertCore(0, sp)
+        p.coreInsert(0, sp)
         rm.append(sp)
     # remove from original spanner bundle
     for sp in rm:
         spannerBundle.remove(sp)
-    p._elementsChanged()
+    p.coreElementsChanged()
     return p
 
-def parseTokens(mh, dst, p, useMeasures):        
+def parseTokens(mh, dst, p, useMeasures):
+    '''
+    parses all the tokens in a measure or part.
+    '''
     # in case need to transpose due to clef indication
     from music21 import abcFormat
 
@@ -215,31 +223,32 @@ def parseTokens(mh, dst, p, useMeasures):
         if isinstance(t, abcFormat.ABCMetadata):
             if t.isMeter():
                 ts = t.getTimeSignatureObject()
-                if ts != None: # can be None
+                if ts is not None: # can be None
                 # should append at the right position
                     if useMeasures: # assume at start of measures
                         dst.timeSignature = ts
                     else:
-                        dst._appendCore(ts)
+                        dst.coreAppend(ts)
             elif t.isKey():
                 ks = t.getKeySignatureObject()
                 if useMeasures:  # assume at start of measures
                     dst.keySignature = ks
                 else:
-                    dst._appendCore(ks)
+                    dst.coreAppend(ks)
                 # check for clef information sometimes stored in key
                 clefObj, transposition = t.getClefObject()
-                if clefObj != None:
+                if clefObj is not None:
                     clefSet = False
-                    #environLocal.printDebug(['found clef in key token:', t, clefObj, transposition])
+                    #environLocal.printDebug(['found clef in key token:', t,
+                    #     clefObj, transposition])
                     if useMeasures:  # assume at start of measures
                         dst.clef = clefObj
                     else:
-                        dst._appendCore(clefObj)
+                        dst.coreAppend(clefObj)
                     postTransposition = transposition
             elif t.isTempo():
                 mmObj = t.getMetronomeMarkObject()
-                dst._appendCore(mmObj)
+                dst.coreAppend(mmObj)
 
         # as ABCChord is subclass of ABCNote, handle first
         elif isinstance(t, abcFormat.ABCChord):
@@ -252,13 +261,18 @@ def parseTokens(mh, dst, p, useMeasures):
                     pitchNameList.append(tSub.pitchName)
                     accStatusList.append(tSub.accidentalDisplayStatus)
             c = chord.Chord(pitchNameList)
-            c.quarterLength = t.quarterLength
+            c.duration.quarterLength = t.quarterLength
+            if t.activeTuplet:
+                thisTuplet = copy.deepcopy(t.activeTuplet)
+                if thisTuplet.durationNormal is None:
+                    thisTuplet.setDurationType(c.duration.type, c.duration.dots)
+                c.duration.appendTuplet(thisTuplet)
             # adjust accidental display for each contained pitch
             for pIndex in range(len(c.pitches)):
-                if c.pitches[pIndex].accidental == None:
+                if c.pitches[pIndex].accidental is None:
                     continue
                 c.pitches[pIndex].accidental.displayStatus = accStatusList[pIndex]
-            dst._appendCore(c)
+            dst.coreAppend(c)
 
             #ql += t.quarterLength
 
@@ -267,10 +281,15 @@ def parseTokens(mh, dst, p, useMeasures):
                 n = note.Rest()
             else:
                 n = note.Note(t.pitchName)
-                if n.accidental != None:
-                    n.accidental.displayStatus = t.accidentalDisplayStatus
+                if n.pitch.accidental is not None:
+                    n.pitch.accidental.displayStatus = t.accidentalDisplayStatus
 
-            n.quarterLength = t.quarterLength
+            n.duration.quarterLength = t.quarterLength
+            if t.activeTuplet:
+                thisTuplet = copy.deepcopy(t.activeTuplet)
+                if thisTuplet.durationNormal is None:
+                    thisTuplet.setDurationType(n.duration.type, n.duration.dots)
+                n.duration.appendTuplet(thisTuplet)
 
             # start or end a tie at note n
             if t.tie is not None:
@@ -289,43 +308,47 @@ def parseTokens(mh, dst, p, useMeasures):
                 n = n.getGrace()
 
             n.articulations = []
-            while len(t.artic) > 0:
+            while any(t.artic):
                 tmp = t.artic.pop()
                 if tmp == "staccato":
                     n.articulations.append(articulations.Staccato())
-                if tmp == "upbow":
+                elif tmp == "upbow":
                     n.articulations.append(articulations.UpBow())
-                if tmp == "downbow":
+                elif tmp == "downbow":
                     n.articulations.append(articulations.DownBow())
-                if tmp == "accent":
+                elif tmp == "accent":
                     n.articulations.append(articulations.Accent())
-                if tmp == "strongaccent":
+                elif tmp == "strongaccent":
                     n.articulations.append(articulations.StrongAccent())
-                if tmp == "tenuto":
+                elif tmp == "tenuto":
                     n.articulations.append(articulations.Tenuto())
 
-            dst._appendCore(n)
+            dst.coreAppend(n, setActiveSite=False)
+            
         elif isinstance(t, abcFormat.ABCSlurStart):
-            p._appendCore(t.slurObj)
+            p.coreAppend(t.slurObj)
         elif isinstance(t, abcFormat.ABCCrescStart):
-            p._appendCore(t.crescObj)
+            p.coreAppend(t.crescObj)
         elif isinstance(t, abcFormat.ABCDimStart):
-            p._appendCore(t.dimObj)
-    dst._elementsChanged()
+            p.coreAppend(t.dimObj)
+    dst.coreElementsChanged()
     return postTransposition, clefSet
 
 def abcToStreamScore(abcHandler, inputM21=None):
-    '''Given an abcHandler object, build into a multi-part :class:`~music21.stream.Score` with metadata.
+    '''
+    Given an abcHandler object, build into a
+    multi-part :class:`~music21.stream.Score` with metadata.
 
     This assumes that this ABCHandler defines a single work (with 1 or fewer reference numbers).
 
     if the optional parameter inputM21 is given a music21 Stream subclass, it will use that object
-    as the outermost object.  However, inner parts will always be made :class:`~music21.stream.Part` objects.
+    as the outermost object.  However, inner parts will
+    always be made :class:`~music21.stream.Part` objects.
     '''
     from music21 import abcFormat
     from music21 import metadata
 
-    if inputM21 == None:
+    if inputM21 is None:
         s = stream.Score()
     else:
         s = inputM21
@@ -365,7 +388,8 @@ def abcToStreamScore(abcHandler, inputM21=None):
     if len(tokenCollections) == 1:
         partHandlers.append(tokenCollections[0])
     else:
-        # add metadata -- stored in tokenCollections[0] -- to each Part (stored in tokenCollections[i])
+        # add metadata -- stored in tokenCollections[0] --
+        #            to each Part (stored in tokenCollections[i])
         for i in range(1, len(tokenCollections)):
             # concatenate abc handler instances
             newABCHandler = tokenCollections[0] + tokenCollections[i]
@@ -383,8 +407,8 @@ def abcToStreamScore(abcHandler, inputM21=None):
         partList.append(p)
 
     for p in partList:
-        s._insertCore(0, p)
-    s._elementsChanged()
+        s.coreInsert(0, p)
+    s.coreElementsChanged()
     return s
 
 
@@ -396,7 +420,7 @@ def abcToStreamOpus(abcHandler, inputM21=None, number=None):
     If a `number` argument is given, and a work is defined by
     that number, that work is returned.
     '''
-    if inputM21 == None:
+    if inputM21 is None:
         opus = stream.Opus()
     else:
         opus = inputM21
@@ -406,7 +430,7 @@ def abcToStreamOpus(abcHandler, inputM21=None, number=None):
     # returns a dictionary of numerical key
     if abcHandler.definesReferenceNumbers():
         abcDict = abcHandler.splitByReferenceNumber()
-        if number != None and number in abcDict:
+        if number is not None and number in abcDict:
             # get number from dictionary; set to new score
             opus = abcToStreamScore(abcDict[number]) # return a score, not an opus
         else: # build entire opus into an opus stream
@@ -416,11 +440,11 @@ def abcToStreamOpus(abcHandler, inputM21=None, number=None):
                 # with meta data in abcToStreamScore
                 try:
                     scoreList.append(abcToStreamScore(abcDict[key]))
-                except:
+                except IndexError:
                     environLocal.warn("Failure for piece number %d" % key)
             for scoreDocument in scoreList:
-                opus._appendCore(scoreDocument)
-            opus._elementsChanged()
+                opus.coreAppend(scoreDocument, setActiveSite=False)
+            opus.coreElementsChanged()
 
     else: # just return single entry in opus object
         opus.append(abcToStreamScore(abcHandler))
@@ -430,7 +454,6 @@ def reBar(music21Part, inPlace=True):
     """
     Re-bar overflow measures using the last known time signature.
 
-    >>> from music21 import corpus
     >>> irl2 = corpus.parse("irl", number=2)
     >>> irl2.metadata.title
     'Aililiu na Gamhna, S.35'
@@ -441,8 +464,8 @@ def reBar(music21Part, inPlace=True):
     without an explicit time signature change, an error in abc parsing due to the
     omission of barlines. The method will split those measures such that they conform
     to the last time signature, in this case 2/4. The default is to reBar in place.
-    The measure numbers are updated accordingly. 
-    
+    The measure numbers are updated accordingly.
+
     (NOTE: reBar is called automatically in abcToStreamPart, hence not demonstrated below...)
 
     The key signature and clef are assumed to be the same in the second measure after the
@@ -501,23 +524,26 @@ def reBar(music21Part, inPlace=True):
             if lastTimeSignature.barDuration.quarterLength != m2.highestTime:
                 try:
                     m2.timeSignature = m2.bestTimeSignature()
-                except stream.StreamException as e:
-                    raise ABCTranslateException("Problem with measure %d (%r): %s" % (music21Measure.number, music21Measure, e))
+                except exceptions21.StreamException as e:
+                    raise ABCTranslateException(
+                        "Problem with measure %d (%r): %s" % (music21Measure.number,
+                                                              music21Measure,
+                                                              e))
                 if measureIndex != len(allMeasures) - 1:
-                    if allMeasures[measureIndex+1].timeSignature is None:
-                        allMeasures[measureIndex+1].timeSignature = lastTimeSignature
+                    if allMeasures[measureIndex + 1].timeSignature is None:
+                        allMeasures[measureIndex + 1].timeSignature = lastTimeSignature
             m2.keySignature = None # suppress the key signature
             m2.clef = None # suppress the clef
             m2.number = m1.number + 1
             measureNumberOffset += 1
-            music21Part.insert(common.opFrac(m1.offsetRational + m1.highestTime), m2)
-        """
-        elif (mEnd + music21Measure.paddingLeft) < tsEnd and measureIndex != len(allMeasures) - 1:
-            # The first and last measures are allowed to be incomplete
-            music21Measure.timeSignature = music21Measure.bestTimeSignature()
-            if allMeasures[measureIndex+1].timeSignature is None:
-                allMeasures[measureIndex+1].timeSignature = lastTimeSignature
-        """
+            music21Part.insert(common.opFrac(m1.offset + m1.highestTime), m2)
+
+        #elif (mEnd + music21Measure.paddingLeft) < tsEnd and measureIndex != len(allMeasures) - 1:
+        #    The first and last measures are allowed to be incomplete
+        #    music21Measure.timeSignature = music21Measure.bestTimeSignature()
+        #    if allMeasures[measureIndex + 1].timeSignature is None:
+        #        allMeasures[measureIndex + 1].timeSignature = lastTimeSignature
+        #
 
     if not inPlace:
         return music21Part
@@ -649,13 +675,13 @@ class Test(unittest.TestCase):
         for n in s.flat.notesAndRests:
             match.append(n.quarterLength)
         shouldFind = [
-            1./3, 1./3, 1./3, 
+            1./3, 1./3, 1./3,
             1./5, 1./5, 1./5, 1./5, 1./5,
             1./6, 1./6, 1./6, 1./6, 1./6, 1./6,
-            1./7, 1./7, 1./7, 1./7, 1./7, 1./7, 1./7, 
+            1./7, 1./7, 1./7, 1./7, 1./7, 1./7, 1./7,
             2./3, 2./3, 2./3, 2./3, 2./3, 2./3,
-            1./12, 1./12, 1./12, 1./12, 1./12, 1./12, 
-            1./12, 1./12, 1./12, 1./12, 1./12, 1./12, 
+            1./12, 1./12, 1./12, 1./12, 1./12, 1./12,
+            1./12, 1./12, 1./12, 1./12, 1./12, 1./12,
             2.0
             ]
         self.assertEqual(match, [common.opFrac(x) for x in shouldFind])
@@ -710,7 +736,8 @@ class Test(unittest.TestCase):
 
         # replace w/ ballad80, smaller or erk5
         fp = corpus.getWork('essenFolksong/teste')
-        self.assertTrue(fp.endswith('essenFolksong/teste.abc') or fp.endswith(r'essenFolksong\teste.abc'))
+        self.assertTrue(fp.endswith('essenFolksong/teste.abc') or
+                        fp.endswith(r'essenFolksong\teste.abc'))
 
         af = abcFormat.ABCFile()
         af.open(fp) # return handler, processes tokens
@@ -895,9 +922,17 @@ class Test(unittest.TestCase):
 
             #s.show()
 
+    def testTranslateBrokenDuration(self):
+        from music21 import corpus
+        unused = corpus.parse('han2.abc', number=445)
+
+
+    def xtestMergeScores(self):
+        from music21 import corpus
+        unused = corpus.parse('josquin/laDeplorationDeLaMorteDeJohannesOckeghem', forceSource=True)
+        # this was getting incorrect Clefs...
 
 if __name__ == "__main__":
-    # sys.arg test options will be used in mainTest()
     import music21
     music21.mainTest(Test)
 

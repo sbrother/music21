@@ -13,36 +13,60 @@
 '''
 Music21 class for dealing with Roman Numeral analysis
 '''
+from __future__ import division, print_function
 
 import unittest
 import copy
 import re
 
+from collections import namedtuple
+
+FigureTuple = namedtuple('FigureTuple', 'aboveBass alter prefix')
+ChordFigureTuple = namedtuple('ChordFigureTuple', 'aboveBass alter prefix pitch')
+
 from music21 import chord
 from music21 import common
 from music21 import exceptions21
+from music21 import harmony
 from music21 import interval
 from music21 import key
 from music21 import pitch
 from music21 import scale
+
+from music21.ext import six
 from music21.figuredBass import notation as fbNotation
-from music21 import harmony
 
 from music21 import environment
 _MOD = 'roman.py'
 environLocal = environment.Environment(_MOD)
 
+# TODO: setting inversion should change the figure
 
 #------------------------------------------------------------------------------
 
 
-SHORTHAND_RE = re.compile('#*-*b*o*[1-9xyz]')
-ENDWITHFLAT_RE = re.compile('[b\-]$')
+SHORTHAND_RE = re.compile(r'#*-*b*o*[1-9xyz]')
+ENDWITHFLAT_RE = re.compile(r'[b\-]$')
 
 # cache all Key/Scale objects created or passed in; re-use
 # permits using internally scored pitch segments
 _scaleCache = {}
 _keyCache = {}
+
+def _getKeyFromCache(keyStr):
+    '''
+    get a key from the cache if it is there; otherwise
+    create a new key and put it in the cache and return it.
+
+    :param keyStr: str
+    :rtype: key.Key
+    '''
+    if keyStr in _keyCache:
+        keyObj = _keyCache[keyStr]
+    else:
+        keyObj = key.Key(keyStr)
+        _keyCache[keyObj.tonicPitchNameWithCase] = keyObj
+    return keyObj
 
 
 figureShorthands = {
@@ -65,7 +89,7 @@ figureShorthands = {
     'bb7b5b3': 'o7',
     'bb7b53': 'o7',
     #'6b5bb3': 'o65',
-    'b7b5b3': 'o/7',
+    'b7b5b3': '/o7',
     }
 
 functionalityScores = {
@@ -95,6 +119,7 @@ functionalityScores = {
     'VI': 42,
     '#VI': 41,
     'vi': 40,
+    'viio': 39,
     '#viio': 39,
     'iio': 37,  # common in Minor
     'iio42': 36,
@@ -119,55 +144,47 @@ functionalityScores = {
 
 
 def expandShortHand(shorthand):
-    '''Expands shorthand notation into a list with all figures expanded:
+    '''
+    Expands shorthand notation into a list with all figures expanded:
 
-    ::
-        >>> from music21 import roman
-        >>> roman.expandShortHand("64")
-        ['6', '4']
+    >>> roman.expandShortHand("64")
+    ['6', '4']
 
-    ::
+    >>> roman.expandShortHand("973")
+    ['9', '7', '3']
 
-        >>> roman.expandShortHand("973")
-        ['9', '7', '3']
+    >>> roman.expandShortHand("11b3")
+    ['11', 'b3']
 
-    ::
+    >>> roman.expandShortHand("b13#9-6")
+    ['b13', '#9', '-6']
 
-        >>> roman.expandShortHand("11b3")
-        ['11', 'b3']
-
-    ::
-
-        >>> roman.expandShortHand("b13#9-6")
-        ['b13', '#9', '-6']
-
-    ::
-
-        >>> roman.expandShortHand("-")
-        ['5', '-3']
+    >>> roman.expandShortHand("-")
+    ['5', '-3']
 
 
     Slashes don't matter
-    
-    ::
 
-        >>> roman.expandShortHand("6/4")
-        ['6', '4']
+    >>> roman.expandShortHand("6/4")
+    ['6', '4']
 
     Note that this is not where abbreviations get expanded
 
-    ::
+    >>> roman.expandShortHand("7") # not 7, 5, 3
+    ['7']
 
-        >>> roman.expandShortHand("7") # not 7,5,3
-        ['7']
+    >>> roman.expandShortHand("4/3") # not 6, 4, 3
+    ['4', '3']
 
-        >>> roman.expandShortHand("4/3") # not 6,4,3
-        ['4', '3']
+    Note that this is ['6'] not ['6', '3']:
+
+    >>> roman.expandShortHand("6")
+    ['6']
 
 
     Returns a list of expanded abbreviations.
     '''
-    shorthand = shorthand.replace('/', '')
+    shorthand = shorthand.replace('/', '') # this line actually seems unnecessary...
     if ENDWITHFLAT_RE.match(shorthand):
         shorthand += "3"
     shorthand = re.sub('11', 'x', shorthand)
@@ -186,95 +203,122 @@ def expandShortHand(shorthand):
     return shGroupOut
 
 
-def figureFromChordAndKey(chordObj, keyObj=None):
-    '''Returns the post RN figure for a given chord in a given key.
+def correctSuffixForChordQuality(chordObj, inversionString):
+    '''
+    Correct a given inversionString suffix given a chord of various qualities.
+    
+    >>> c = chord.Chord('E3 C4 G4')
+    >>> roman.correctSuffixForChordQuality(c, '6')
+    '6'
+    
+    >>> c = chord.Chord('E3 C4 G-4')
+    >>> roman.correctSuffixForChordQuality(c, '6')
+    'o6'
+    
+    '''
+    fifthType = chordObj.semitonesFromChordStep(5)
+    if fifthType == 6:
+        qualityName = 'o'
+    elif fifthType == 8:
+        qualityName = '+'
+    else:
+        qualityName = ''
+
+    if inversionString and (inversionString.startswith('o') or inversionString.startswith('/o')):
+        if qualityName == 'o':  # don't call viio7, viioo7.
+            qualityName = ''
+
+    seventhType = chordObj.semitonesFromChordStep(7)
+    if seventhType and fifthType == 6: # there is a seventh and this is a diminished 5
+        if seventhType == 10 and qualityName == 'o':
+            qualityName = '/o'
+        elif seventhType != 9:
+            pass # do something for odd odd chords...
+    #print (inversionString, fifthName)
+    return qualityName + inversionString
+
+
+def postFigureFromChordAndKey(chordObj, keyObj=None):
+    '''
+    Returns the post RN figure for a given chord in a given key.
 
     If keyObj is none, it uses the root as a major key:
 
-    ::
-
-        >>> from music21 import roman
-        >>> roman.figureFromChordAndKey(
-        ...     chord.Chord(['F#2','D3','A-3','C#4']),
-        ...     key.Key('C'),
-        ...     )
-        '6#5b3'
+    >>> from music21 import roman
+    >>> roman.postFigureFromChordAndKey(
+    ...     chord.Chord(['F#2', 'D3', 'A-3', 'C#4']),
+    ...     key.Key('C'),
+    ...     )
+    'o6#5b3'
 
     The method substitutes shorthand (e.g., '6' not '63')
 
-    ::
+    >>> roman.postFigureFromChordAndKey(
+    ...     chord.Chord(['E3', 'C4', 'G4']),
+    ...     key.Key('C'),
+    ...     )
+    '6'
 
-        >>> roman.figureFromChordAndKey(
-        ...     chord.Chord(['E3','C4','G4']),
-        ...     key.Key('C'),
-        ...     )
-        '6'
+    >>> roman.postFigureFromChordAndKey(
+    ...     chord.Chord(['E3', 'C4', 'G4', 'B-5']),
+    ...     key.Key('F'),
+    ...     )
+    '65'
 
-    ::
-
-        >>> roman.figureFromChordAndKey(
-        ...     chord.Chord(['E3','C4','G4','B-5']),
-        ...     key.Key('F'),
-        ...     )
-        '65'
-
-    ::
-
-        >>> roman.figureFromChordAndKey(
-        ...     chord.Chord(['E3','C4','G4','B-5']),
-        ...     key.Key('C'),
-        ...     )
-        '6b5'
+    >>> roman.postFigureFromChordAndKey(
+    ...     chord.Chord(['E3', 'C4', 'G4', 'B-5']),
+    ...     key.Key('C'),
+    ...     )
+    '6b5'
 
     We reduce common omissions from seventh chords to be '7' instead
     of '75', '73', etc.
 
-    ::
+    >>> roman.postFigureFromChordAndKey(
+    ...     chord.Chord(['A3', 'E-4', 'G-4']),
+    ...     key.Key('b-'),
+    ...     )
+    'o7'
 
-        >>> roman.figureFromChordAndKey(
-        ...     chord.Chord(['A3','E-4','G-4']),
-        ...     key.Key('b-'),
-        ...     )
-        '7'
-
-    Return string.
+    Returns string.
     '''
     if keyObj is None:
         keyObj = key.Key(chordObj.root())
-    chordFigureTuplets = figureTuplets(chordObj, keyObj)
-    rootFigureAlter = chordFigureTuplets[0][1]
+    chordFigureTuples = figureTuples(chordObj, keyObj)
+    bassFigureAlter = chordFigureTuples[0].alter
 
     allFigureStringList = []
 
     third = chordObj.third
     fifth = chordObj.fifth
     #seventh = chordObj.seventh
-    for figureTuplet in sorted(
-        chordFigureTuplets,
-        key=lambda tup: tup[0],
-        reverse=True,
-        ):
-        (diatonicIntervalNum, alter, alterStr, pitchObj) = figureTuplet
-        if diatonicIntervalNum != 1 and pitchObj is third:
+    for ft in sorted(chordFigureTuples,
+                               key=lambda tup: (-1 * tup.aboveBass, tup.alter, tup.pitch.ps)):
+        # (diatonicIntervalNum, alter, alterStr, pitchObj) = figureTuple
+        prefix = ft.prefix
+        
+        if ft.aboveBass != 1 and ft.pitch is third:
             if chordObj.isMajorTriad() or chordObj.isMinorTriad():
-                alterStr = ''  # alterStr[1:]
-            elif chordObj.isMinorTriad() and alter > 0:
-                alterStr = ''  # alterStr[1:]
-        elif diatonicIntervalNum != 1 and pitchObj is fifth:
-            if chordObj.isDiminishedTriad() or chordObj.isAugmentedTriad() or \
-                chordObj.isMajorTriad() or chordObj.isMinorTriad():
-                alterStr = ''  # alterStr[1:]
+                prefix = ''  # alterStr[1:]
+            elif chordObj.isMinorTriad() and ft.alter > 0:
+                prefix = ''  # alterStr[1:]
+        elif (ft.aboveBass != 1
+              and ft.pitch is fifth
+              and chordObj.isDiminishedTriad()
+                  or chordObj.isAugmentedTriad()
+                  or chordObj.isMajorTriad()
+                  or chordObj.isMinorTriad()):
+            prefix = ''  # alterStr[1:]
 
-        if diatonicIntervalNum == 1:
-            if alter != rootFigureAlter and alterStr != '':
-                pass
-                #diatonicIntervalNum = 8 # mark altered octaves as 8 not 1
-                #figureString = alterStr + str(diatonicIntervalNum)
-                #if figureString not in allFigureStringList:
-                #    filter duplicates and put at beginning
-                #    allFigureStringList.insert(0, figureString)
+        if ft.aboveBass == 1:
+            if ft.alter != bassFigureAlter and prefix != '':
+                # mark altered octaves as 8 not 1
+                figureString = prefix + "8"
+                if figureString not in allFigureStringList:
+                    # filter duplicates and put at beginning
+                    allFigureStringList.insert(0, figureString)
         else:
-            figureString = alterStr + str(diatonicIntervalNum)
+            figureString = prefix + str(ft.aboveBass)
             # filter out duplicates...
             if figureString not in allFigureStringList:
                 allFigureStringList.append(figureString)
@@ -287,10 +331,12 @@ def figureFromChordAndKey(chordObj, keyObj=None):
     if allFigureString in ['75', '73']:
         allFigureString = '7'
 
+    allFigureString = correctSuffixForChordQuality(chordObj, allFigureString)
+
     return allFigureString
 
 
-def figureTuplets(chordObject, keyObject):
+def figureTuples(chordObject, keyObject):
     '''
     Return a set of tuplets for each pitch showing the presence of a note, its
     interval above the bass its alteration (float) from a step in the given
@@ -301,39 +347,47 @@ def figureTuplets(chordObject, keyObject):
 
     For instance, in C major, F# D A- C# would be:
 
-    ::
+    >>> from music21 import roman
+    >>> roman.figureTuples(
+    ...     chord.Chord(['F#2', 'D3', 'A-3', 'C#4']),
+    ...     key.Key('C'),
+    ...     )
+    [ChordFigureTuple(aboveBass=1, alter=1.0, prefix='#', pitch=<music21.pitch.Pitch F#2>), 
+     ChordFigureTuple(aboveBass=6, alter=0.0, prefix='', pitch=<music21.pitch.Pitch D3>), 
+     ChordFigureTuple(aboveBass=3, alter=-1.0, prefix='b', pitch=<music21.pitch.Pitch A-3>), 
+     ChordFigureTuple(aboveBass=5, alter=1.0, prefix='#', pitch=<music21.pitch.Pitch C#4>)]
 
-        >>> from music21 import roman
-        >>> roman.figureTuplets(
-        ...     chord.Chord(['F#2','D3','A-3','C#4']),
-        ...     key.Key('C'),
-        ...     )
-        [(1, 1.0, '#', <music21.pitch.Pitch F#2>),
-        (6, 0.0, '', <music21.pitch.Pitch D3>),
-        (3, -1.0, 'b', <music21.pitch.Pitch A-3>),
-        (5, 1.0, '#', <music21.pitch.Pitch C#4>)]
+    >>> roman.figureTuples(
+    ...     chord.Chord(['E3', 'C4', 'G4', 'B-5']),
+    ...     key.Key('C'),
+    ...     )
+    [ChordFigureTuple(aboveBass=1, alter=0.0, prefix='', pitch=<music21.pitch.Pitch E3>), 
+     ChordFigureTuple(aboveBass=6, alter=0.0, prefix='', pitch=<music21.pitch.Pitch C4>), 
+     ChordFigureTuple(aboveBass=3, alter=0.0, prefix='', pitch=<music21.pitch.Pitch G4>), 
+     ChordFigureTuple(aboveBass=5, alter=-1.0, prefix='b', pitch=<music21.pitch.Pitch B-5>)]
 
-    ::
-
-        >>> roman.figureTuplets(
-        ...     chord.Chord(['E3','C4','G4','B-5']),
-        ...     key.Key('C'),
-        ...     )
-        [(1, 0.0, '', <music21.pitch.Pitch E3>),
-        (6, 0.0, '', <music21.pitch.Pitch C4>),
-        (3, 0.0, '', <music21.pitch.Pitch G4>),
-        (5, -1.0, 'b', <music21.pitch.Pitch B-5>)]
-
+    >>> roman.figureTuples(
+    ...     chord.Chord(['C4', 'E4', 'G4', 'C#4']),
+    ...     key.Key('C'),
+    ...     )
+    [ChordFigureTuple(aboveBass=1, alter=0.0, prefix='', pitch=<music21.pitch.Pitch C4>), 
+     ChordFigureTuple(aboveBass=3, alter=0.0, prefix='', pitch=<music21.pitch.Pitch E4>), 
+     ChordFigureTuple(aboveBass=5, alter=0.0, prefix='', pitch=<music21.pitch.Pitch G4>), 
+     ChordFigureTuple(aboveBass=1, alter=1.0, prefix='#', pitch=<music21.pitch.Pitch C#4>)]
     '''
     result = []
     bass = chordObject.bass()
     for thisPitch in chordObject.pitches:
-        appendTuple = figureTupletSolo(thisPitch, keyObject, bass)
+        shortTuple = figureTupleSolo(thisPitch, keyObject, bass)
+        appendTuple = ChordFigureTuple(shortTuple.aboveBass,
+                                        shortTuple.alter,
+                                        shortTuple.prefix,
+                                        thisPitch)
         result.append(appendTuple)
     return result
 
 
-def figureTupletSolo(pitchObj, keyObj, bass):
+def figureTupleSolo(pitchObj, keyObj, bass):
     '''
     Return a single tuple for a pitch and key showing the interval above
     the bass, its alteration from a step in the given key, an alteration
@@ -341,20 +395,17 @@ def figureTupletSolo(pitchObj, keyObj, bass):
 
     For instance, in C major, an A-3 above an F# bass would be:
 
-    ::
+    >>> from music21 import roman
+    >>> roman.figureTupleSolo(
+    ...     pitch.Pitch('A-3'),
+    ...     key.Key('C'),
+    ...     pitch.Pitch('F#2'),
+    ...     )
+    FigureTuple(aboveBass=3, alter=-1.0, prefix='b')
 
-        >>> from music21 import roman
-        >>> roman.figureTupletSolo(
-        ...     pitch.Pitch('A-3'),
-        ...     key.Key('C'),
-        ...     pitch.Pitch('F#2'),
-        ...     )
-        (3, -1.0, 'b', <music21.pitch.Pitch A-3>)
-
-    Return tuple.
+    Returns a namedtuple called a FigureTuple.
     '''
-    unused_scaleStep, scaleAccidental = \
-        keyObj.getScaleDegreeAndAccidentalFromPitch(pitchObj)
+    unused_scaleStep, scaleAccidental = keyObj.getScaleDegreeAndAccidentalFromPitch(pitchObj)
 
     thisInterval = interval.notesToInterval(bass, pitchObj)
     aboveBass = thisInterval.diatonic.generic.mod7
@@ -371,7 +422,7 @@ def figureTupletSolo(pitchObj, keyObj, bass):
         else:
             rootAlterationString = ''
 
-    appendTuple = (aboveBass, alterDiff, rootAlterationString, pitchObj)
+    appendTuple = FigureTuple(aboveBass, alterDiff, rootAlterationString)
     return appendTuple
 
 
@@ -382,27 +433,18 @@ def identifyAsTonicOrDominant(inChord, inKey):
     dominant, but only two pitches are provided in the chord. If neither tonic
     nor dominant is possibly correct, False is returned
 
-    ::
+    >>> from music21 import roman
+    >>> roman.identifyAsTonicOrDominant(['B2', 'F5'], key.Key('C'))
+    'V65'
 
-        >>> from music21 import roman
-        >>> roman.identifyAsTonicOrDominant(['B2','F5'], key.Key('C'))
-        'V65'
+    >>> roman.identifyAsTonicOrDominant(['B3', 'G4'], key.Key('g'))
+    'i6'
 
-    ::
+    >>> roman.identifyAsTonicOrDominant(['C3', 'B4'], key.Key('f'))
+    'V7'
 
-        >>> roman.identifyAsTonicOrDominant(['B3','G4'], key.Key('g'))
-        'i6'
-
-    ::
-
-        >>> roman.identifyAsTonicOrDominant(['C3', 'B4'], key.Key('f'))
-        'V7'
-
-    ::
-
-        >>> roman.identifyAsTonicOrDominant(['D3'], key.Key('f'))
-        False
-
+    >>> roman.identifyAsTonicOrDominant(['D3'], key.Key('f'))
+    False
     '''
     if isinstance(inChord, list):
         inChord = chord.Chord(inChord)
@@ -454,12 +496,14 @@ def identifyAsTonicOrDominant(inChord, inKey):
     return rootScaleDeg + romanInversionName(inChord)
 
 
-def romanInversionName(inChord):
+def romanInversionName(inChord, inv=None):
     '''
     Extremely similar to Chord's inversionName() method, but returns string
     values and allows incomplete triads
     '''
-    inv = inChord.inversion()
+    if inv is None:
+        inv = inChord.inversion()
+    
     if inChord.isSeventh() or inChord.seventh is not None:
         if inv == 0:
             return '7'
@@ -471,9 +515,9 @@ def romanInversionName(inChord):
             return '42'
         else:
             return ''
-    elif inChord.isTriad() \
-        or inChord.isIncompleteMajorTriad() \
-        or inChord.isIncompleteMinorTriad():
+    elif (inChord.isTriad()
+            or inChord.isIncompleteMajorTriad()
+            or inChord.isIncompleteMinorTriad()):
         if inv == 0:
             return ''  # not 53
         elif inv == 1:
@@ -485,214 +529,275 @@ def romanInversionName(inChord):
     else:
         return ''
 
+def correctRNAlterationForMinor(figureTuple, keyObj):
+    '''
+    Takes in a FigureTuple and a Key object and returns the same or a
+    new FigureTuple correcting for the fact that, for instance, Ab in c minor
+    is VI not vi.  Works properly only if the note is the root of the chord.
+    
+    >>> ft1 = roman.FigureTuple(aboveBass=6, alter=-1, prefix='b')
+    
+    Does nothing for major:
+    
+    >>> ft2 = roman.correctRNAlterationForMinor(ft1, key.Key('C'))
+    >>> ft2
+    FigureTuple(aboveBass=6, alter=-1, prefix='b')
+    >>> ft1 is ft2
+    True
 
-def romanNumeralFromChord(
-    chordObj,
-    keyObj=None,
-    preferSecondaryDominants=False,
-    ):
+    Does nothing for steps other than 6 or 7:
+
+    >>> ft3 = roman.FigureTuple(aboveBass=4, alter=-1, prefix='b')
+    >>> ft4 = roman.correctRNAlterationForMinor(ft3, key.Key('c'))
+    >>> ft4
+    FigureTuple(aboveBass=4, alter=-1, prefix='b')
+    >>> ft3 is ft4
+    True
+
+    >>> ft5 = roman.FigureTuple(aboveBass=6, alter=-1, prefix='')
+    >>> roman.correctRNAlterationForMinor(ft5, key.Key('c'))
+    FigureTuple(aboveBass=6, alter=-1, prefix='b')
+
+    >>> ft6 = roman.FigureTuple(aboveBass=6, alter=0, prefix='')
+    >>> roman.correctRNAlterationForMinor(ft6, key.Key('c'))
+    FigureTuple(aboveBass=6, alter=0, prefix='b')
+
+    >>> ft7 = roman.FigureTuple(aboveBass=7, alter=1, prefix='#')
+    >>> roman.correctRNAlterationForMinor(ft7, key.Key('c'))
+    FigureTuple(aboveBass=7, alter=0, prefix='')
+
+    '''
+    if keyObj.mode != 'minor':
+        return figureTuple
+    if figureTuple.aboveBass not in (6, 7):
+        return figureTuple
+    
+    alter = figureTuple.alter
+    rootAlterationString = figureTuple.prefix
+    
+    if alter == 1.0:
+        alter = 0
+        rootAlterationString = ''
+    elif alter == 0.0:
+        alter = 0  # NB! does not change!
+        rootAlterationString = 'b'
+    ## more exotic:
+    elif alter > 1.0:
+        alter = alter - 1
+        rootAlterationString = rootAlterationString[1:]
+    elif alter < 0.0:
+        rootAlterationString = 'b' + rootAlterationString
+
+    return FigureTuple(figureTuple.aboveBass, alter, rootAlterationString)
+
+
+def romanNumeralFromChord(chordObj,
+                          keyObj=None,
+                          preferSecondaryDominants=False):
     '''
     Takes a chord object and returns an appropriate chord name.  If keyObj is
     omitted, the root of the chord is considered the key (if the chord has a
-    major third, it's major; otherwise it's minor):
+    major third, it's major; otherwise it's minor).  preferSecondaryDominants does not currently
+    do anything.
 
-    ::
-
-        >>> from music21 import roman
-        >>> rn = roman.romanNumeralFromChord(
-        ...     chord.Chord(['E-3','C4','G-6']),
-        ...     key.Key('g#'),
-        ...     )
-        >>> rn
-        <music21.roman.RomanNumeral bivo6 in g# minor>
+    >>> rn = roman.romanNumeralFromChord(
+    ...     chord.Chord(['E-3', 'C4', 'G-6']),
+    ...     key.Key('g#'),
+    ...     )
+    >>> rn
+    <music21.roman.RomanNumeral bivo6 in g# minor>
 
     The pitches remain the same with the same octaves:
 
-    ::
+    >>> for pitch in rn.pitches:
+    ...     pitch
+    ...
+    <music21.pitch.Pitch E-3>
+    <music21.pitch.Pitch C4>
+    <music21.pitch.Pitch G-6>
 
-        >>> for pitch in rn.pitches:
-        ...     pitch
-        ...
-        <music21.pitch.Pitch E-3>
-        <music21.pitch.Pitch C4>
-        <music21.pitch.Pitch G-6>
-
-    ::
-
-        >>> romanNumeral2 = roman.romanNumeralFromChord(
-        ...     chord.Chord(['E3','C4','G4','B-4','E5','G5']),
-        ...     key.Key('F'),
-        ...     )
-        >>> romanNumeral2
-        <music21.roman.RomanNumeral V65 in F major>
+    >>> romanNumeral2 = roman.romanNumeralFromChord(
+    ...     chord.Chord(['E3', 'C4', 'G4', 'B-4', 'E5', 'G5']),
+    ...     key.Key('F'),
+    ...     )
+    >>> romanNumeral2
+    <music21.roman.RomanNumeral V65 in F major>
 
     Note that vi and vii in minor signifies what you might think of
     alternatively as #vi and #vii:
 
-    ::
+    >>> romanNumeral3 = roman.romanNumeralFromChord(
+    ...     chord.Chord(['A4', 'C5', 'E-5']),
+    ...     key.Key('c'),
+    ...     )
+    >>> romanNumeral3
+    <music21.roman.RomanNumeral vio in c minor>
 
-        >>> romanNumeral3 = roman.romanNumeralFromChord(
-        ...     chord.Chord(['A4','C5','E-5']),
-        ...     key.Key('c'),
-        ...     )
-        >>> romanNumeral3
-        <music21.roman.RomanNumeral vio in c minor>
+    >>> romanNumeral4 = roman.romanNumeralFromChord(
+    ...     chord.Chord(['A-4', 'C5', 'E-5']),
+    ...     key.Key('c'),
+    ...     )
+    >>> romanNumeral4
+    <music21.roman.RomanNumeral bVI in c minor>
 
-    ::
+    >>> romanNumeral5 = roman.romanNumeralFromChord(
+    ...     chord.Chord(['B4', 'D5', 'F5']),
+    ...     key.Key('c'),
+    ...     )
+    >>> romanNumeral5
+    <music21.roman.RomanNumeral viio in c minor>
 
-        >>> romanNumeral4 = roman.romanNumeralFromChord(
-        ...     chord.Chord(['A-4','C5','E-5']),
-        ...     key.Key('c'),
-        ...     )
-        >>> romanNumeral4
-        <music21.roman.RomanNumeral bVI in c minor>
-
-    ::
-
-        >>> romanNumeral5 = roman.romanNumeralFromChord(
-        ...     chord.Chord(['B4','D5','F5']),
-        ...     key.Key('c'),
-        ...     )
-        >>> romanNumeral5
-        <music21.roman.RomanNumeral viio in c minor>
-
-    ::
-
-        >>> romanNumeral6 = roman.romanNumeralFromChord(
-        ...     chord.Chord(['B-4','D5','F5']),
-        ...     key.Key('c'),
-        ...     )
-        >>> romanNumeral6
-        <music21.roman.RomanNumeral bVII in c minor>
+    >>> romanNumeral6 = roman.romanNumeralFromChord(
+    ...     chord.Chord(['B-4', 'D5', 'F5']),
+    ...     key.Key('c'),
+    ...     )
+    >>> romanNumeral6
+    <music21.roman.RomanNumeral bVII in c minor>
 
     Diminished and half-diminished seventh chords can omit the third and still
     be diminished: (n.b. we also demonstrate that chords can be created from a
     string):
 
-    ::
-
-        >>> romanNumeralDim7 = roman.romanNumeralFromChord(
-        ...     chord.Chord("A3 E-4 G-4"),
-        ...     key.Key('b-'),
-        ...     )
-        >>> romanNumeralDim7
-        <music21.roman.RomanNumeral viio7 in b- minor>
+    >>> romanNumeralDim7 = roman.romanNumeralFromChord(
+    ...     chord.Chord("A3 E-4 G-4"),
+    ...     key.Key('b-'),
+    ...     )
+    >>> romanNumeralDim7
+    <music21.roman.RomanNumeral viio7 in b- minor>
 
     For reference, odder notes:
 
-    ::
+    >>> romanNumeral7 = roman.romanNumeralFromChord(
+    ...     chord.Chord(['A--4', 'C-5', 'E--5']),
+    ...     key.Key('c'),
+    ...     )
+    >>> romanNumeral7
+    <music21.roman.RomanNumeral bbVI in c minor>
 
-        >>> romanNumeral7 = roman.romanNumeralFromChord(
-        ...     chord.Chord(['A--4','C-5','E--5']),
-        ...     key.Key('c'),
-        ...     )
-        >>> romanNumeral7
-        <music21.roman.RomanNumeral bbVI in c minor>
+    >>> romanNumeral8 = roman.romanNumeralFromChord(
+    ...     chord.Chord(['A#4', 'C#5', 'E#5']),
+    ...     key.Key('c'),
+    ...     )
+    >>> romanNumeral8
+    <music21.roman.RomanNumeral #vi in c minor>
 
-    ::
+    >>> romanNumeral10 = roman.romanNumeralFromChord(
+    ...     chord.Chord(['F#3', 'A3', 'E4', 'C5']),
+    ...     key.Key('d'),
+    ...     )
+    >>> romanNumeral10
+    <music21.roman.RomanNumeral #iii/o7 in d minor>
 
-        >>> romanNumeral8 = roman.romanNumeralFromChord(
-        ...     chord.Chord(['A#4','C#5','E#5']),
-        ...     key.Key('c'),
-        ...     )
-        >>> romanNumeral8
-        <music21.roman.RomanNumeral #vi in c minor>
 
-    OMIT_FROM_DOCS
+    Former bugs:
 
-#    >>> romanNumeral9 = roman.romanNumeralFromChord(
-#    ...     chord.Chord(['C4','E5','G5', 'C#6', 'C7', 'C#8']),
-#    ...     key.Key('C'),
-#    ...     )
-#    >>> romanNumeral9
-#    <music21.roman.RomanNumeral I#853 in C major>
-#
-#    >>> romanNumeral10 = roman.romanNumeralFromChord(
-#    ...     chord.Chord(['F#3', 'A3', 'E4', 'C5']),
-#    ...     key.Key('d'),
-#    ...     )
-#    >>> romanNumeral10
-#    <music21.roman.RomanNumeral #iiio/7 in d minor>
+    Should be iii7
 
+    >>> romanNumeral11 = roman.romanNumeralFromChord(
+    ...     chord.Chord(['E4', 'G4', 'B4', 'D5']),
+    ...     key.Key('C'),
+    ...     )
+    >>> romanNumeral11
+    <music21.roman.RomanNumeral iii7 in C major>
+
+    Should be vi/o7 # gave vio7
+
+    >>> roman.romanNumeralFromChord(chord.Chord("A3 C4 E-4 G4"), key.Key('c'))
+    <music21.roman.RomanNumeral vi/o7 in c minor>
+
+    Should be vii/o7 # gave viio7
+
+    >>> roman.romanNumeralFromChord(chord.Chord("A3 C4 E-4 G4"), key.Key('B-'))
+    <music21.roman.RomanNumeral vii/o7 in B- major>
+
+
+    Should be I#853
+
+    >>> romanNumeral9 = roman.romanNumeralFromChord(
+    ...     chord.Chord(['C4', 'E5', 'G5', 'C#6']),
+    ...     key.Key('C'),
+    ...     )
+    >>> romanNumeral9
+    <music21.roman.RomanNumeral I#853 in C major>
+
+
+    Note that this should be III+642 gives III+#642 (# before 6 is unnecessary)
+
+    # >>> roman.romanNumeralFromChord(chord.Chord("B3 D3 E-3 G3"), key.Key('c'))
+    # <music21.roman.RomanNumeral III+642 in c minor>
+
+
+    These two are debatable -- is the harmonic minor or the natural minor used as the basis?
+
+    # >>> roman.romanNumeralFromChord(chord.Chord("F4 A4 C5 E-5"), key.Key('c'))
+    # <music21.roman.RomanNumeral IVb753 in c minor>
+    # <music21.roman.RomanNumeral IV75#3 in c minor>
+
+    # >>> roman.romanNumeralFromChord(chord.Chord("F4 A4 C5 E5"), key.Key('c'))
+    # <music21.roman.RomanNumeral IV7 in c minor>
+    # <music21.roman.RomanNumeral IV#75#3 in c minor>
     '''
+    #TODO: Make sure 9 works
     #stepAdjustments = {'minor' : {3: -1, 6: -1, 7: -1},
     #                   'diminished' : {3: -1, 5: -1, 6: -1, 7: -2},
     #                   'half-diminished': {3: -1, 5: -1, 6: -1, 7: -1},
     #                   'augmented': {5: 1},
     #                   }
-    chordObjSemiclosed = chordObj.semiClosedPosition(inPlace=False)
     root = chordObj.root()
-    thirdType = chordObjSemiclosed.semitonesFromChordStep(3)
+    thirdType = chordObj.semitonesFromChordStep(3)
     if thirdType == 4:
         isMajorThird = True
     else:
         isMajorThird = False
 
     if isMajorThird:
-        rootkeyObj = key.Key(root.name, mode='major')
+        rootkeyObj = _getKeyFromCache(root.name.upper())
     else:
-        rootkeyObj = key.Key(root.name.lower(), mode='minor')
+        rootkeyObj = _getKeyFromCache(root.name.lower())
 
     if keyObj is None:
         keyObj = rootkeyObj
 
-    fifthType = chordObjSemiclosed.semitonesFromChordStep(5)
-    if fifthType == 6:
-        fifthName = 'o'
-    elif fifthType == 8:
-        fifthName = '+'
-    else:
-        fifthName = ''
+    ft = figureTupleSolo(root, keyObj, keyObj.tonic) # a FigureTuple
+    ft = correctRNAlterationForMinor(ft, keyObj)
 
-    stepNumber, alter, rootAlterationString, unused = figureTupletSolo(
-        root, keyObj, keyObj.tonic)
-
-    if keyObj.mode == 'minor' and stepNumber in [6, 7]:
-        if alter == 1.0:
-            alter = 0
-            rootAlterationString = ''
-        elif alter == 0.0:
-            alter = 0  # NB! does not change!
-            rootAlterationString = 'b'
-        ## more exotic:
-        elif alter > 1.0:
-            alter = alter - 1
-            rootAlterationString = rootAlterationString[1:]
-        elif alter < 0.0:
-            rootAlterationString = 'b' + rootAlterationString
-
-    if alter == 0:
-        alteredKeyObj = key.Key(keyObj.tonic, rootkeyObj.mode)
+    if ft.alter == 0:
+        tonicPitch = keyObj.tonic
     else:
         # Altered scale degrees, such as #V require a different hypothetical
         # tonic:
+
+        # not worth caching yet -- 150 microseconds; we're trying to lower milliseconds
         transposeInterval = interval.intervalFromGenericAndChromatic(
             interval.GenericInterval(1),
-            interval.ChromaticInterval(alter))
-        alteredKeyObj = key.Key(
-            transposeInterval.transposePitch(keyObj.tonic),
-            rootkeyObj.mode,
-            )
+            interval.ChromaticInterval(ft.alter))
+        tonicPitch = transposeInterval.transposePitch(keyObj.tonic)
 
-    stepRoman = common.toRoman(stepNumber)
+    if keyObj.mode == 'major':
+        tonicPitchName = tonicPitch.name.upper()
+    else:
+        tonicPitchName = tonicPitch.name.lower()
+
+
+    alteredKeyObj = _getKeyFromCache(tonicPitchName)
+
+    stepRoman = common.toRoman(ft.aboveBass)
     if isMajorThird:
         pass
     elif not isMajorThird:
         stepRoman = stepRoman.lower()
-    inversionString = figureFromChordAndKey(chordObj, alteredKeyObj)
+    inversionString = postFigureFromChordAndKey(chordObj, alteredKeyObj)
 
-    if len(inversionString) > 0 and inversionString[0] == 'o':
-        if fifthName == 'o':  # don't call viio7, viioo7.
-            fifthName = ''
-    #print (inversionString, fifthName)
-    rnString = rootAlterationString + stepRoman + fifthName + inversionString
+    rnString = ft.prefix + stepRoman + inversionString
+    
     try:
-        rn = RomanNumeral(rnString, keyObj)
+        rn = RomanNumeral(rnString, keyObj, updatePitches=False)
     except fbNotation.ModifierException as strerror:
         raise RomanNumeralException(
             'Could not parse {0} from chord {1} as an RN '
             'in key {2}: {3}'.format(rnString, chordObj, keyObj, strerror))
 
+    # Is this linking them in an unsafe way?
     rn.pitches = chordObj.pitches
     return rn
 
@@ -721,399 +826,303 @@ class RomanNumeral(harmony.Harmony):
     e.g., V in any key. but when realized, keyless RomanNumerals are
     treated as if they are in C major).
 
-    ::
+    >>> from music21 import roman
+    >>> V = roman.RomanNumeral('V') # could also use 5
+    >>> V.quality
+    'major'
 
-        >>> from music21 import roman
-        >>> V = roman.RomanNumeral('V') # could also use 5
-        >>> V.quality
-        'major'
+    >>> V.inversion()
+    0
 
-    ::
+    >>> V.forteClass
+    '3-11B'
 
-        >>> V.inversion()
-        0
+    >>> V.scaleDegree
+    5
 
-    ::
+    >>> for pitch in V.pitches:  # default key-- C Major
+    ...     pitch
+    ...
+    <music21.pitch.Pitch G4>
+    <music21.pitch.Pitch B4>
+    <music21.pitch.Pitch D5>
 
-        >>> V.forteClass
-        '3-11B'
+    >>> neapolitan = roman.RomanNumeral('N6', 'c#') # could also use "bII6"
+    >>> neapolitan.key
+    <music21.key.Key of c# minor>
 
-    ::
+    >>> neapolitan.isMajorTriad()
+    True
 
-        >>> V.scaleDegree
-        5
+    >>> neapolitan.scaleDegreeWithAlteration
+    (2, <accidental flat>)
 
-    ::
+    >>> for pitch in neapolitan.pitches:  # default octaves
+    ...     pitch
+    ...
+    <music21.pitch.Pitch F#4>
+    <music21.pitch.Pitch A4>
+    <music21.pitch.Pitch D5>
 
-        >>> for pitch in V.pitches:  # default key-- C Major
-        ...     pitch
-        ...
-        <music21.pitch.Pitch G4>
-        <music21.pitch.Pitch B4>
-        <music21.pitch.Pitch D5>
+    >>> neapolitan2 = roman.RomanNumeral('bII6', 'g#')
+    >>> [str(p) for p in neapolitan2.pitches]
+    ['C#5', 'E5', 'A5']
 
-    ::
+    >>> neapolitan2.scaleDegree
+    2
 
-        >>> neapolitan = roman.RomanNumeral('N6', 'c#') # could also use "bII6"
-        >>> neapolitan.key
-        <music21.key.Key of c# minor>
+    >>> em = key.Key('e')
+    >>> dominantV = roman.RomanNumeral('V7', em)
+    >>> [str(p) for p in dominantV.pitches]
+    ['B4', 'D#5', 'F#5', 'A5']
 
-    ::
-
-        >>> neapolitan.isMajorTriad()
-        True
-
-    ::
-
-        >>> neapolitan.scaleDegreeWithAlteration
-        (2, <accidental flat>)
-
-    ::
-
-        >>> for pitch in neapolitan.pitches:  # default octaves
-        ...     pitch
-        ...
-        <music21.pitch.Pitch F#4>
-        <music21.pitch.Pitch A4>
-        <music21.pitch.Pitch D5>
-
-    ::
-
-        >>> neapolitan2 = roman.RomanNumeral('bII6', 'g#')
-        >>> [str(p) for p in neapolitan2.pitches]
-        ['C#5', 'E5', 'A5']
-
-    ::
-
-        >>> neapolitan2.scaleDegree
-        2
-
-    ::
-
-        >>> em = key.Key('e')
-        >>> dominantV = roman.RomanNumeral('V7', em)
-        >>> [str(p) for p in dominantV.pitches]
-        ['B4', 'D#5', 'F#5', 'A5']
-
-    ::
-
-        >>> minorV = roman.RomanNumeral('V43', em, caseMatters = False)
-        >>> [str(p) for p in minorV.pitches]
-        ['F#4', 'A4', 'B4', 'D5']
+    >>> minorV = roman.RomanNumeral('V43', em, caseMatters=False)
+    >>> [str(p) for p in minorV.pitches]
+    ['F#4', 'A4', 'B4', 'D5']
 
 
     In minor -- VII and VI are assumed to refer to the flattened scale degree.
     vii, viio, viio7, vii/o7 and vi, vio, vio7, vi/o7 refer to the sharpened scale
     degree.  To get a minor triad on lowered 6 for instance, you will need to use 'bvi'
-    while to get a major triad on raised 6, use '#VI'.  
-    
+    while to get a major triad on raised 6, use '#VI'.
+
     The actual rule is that if the chord implies minor, diminished, or half-diminished,
     an implied "#" is read before the figure.  Anything else does not add the sharp.
     The lowered (natural minor) is the assumed basic chord.
 
-    ::
+    >>> majorFlatSeven = roman.RomanNumeral('VII', em)
+    >>> [str(p) for p in majorFlatSeven.pitches]
+    ['D5', 'F#5', 'A5']
 
-        >>> majorFlatSeven = roman.RomanNumeral('VII', em)
-        >>> [str(p) for p in majorFlatSeven.pitches]
-        ['D5', 'F#5', 'A5']
+    >>> minorSharpSeven = roman.RomanNumeral('vii', em)
+    >>> [str(p) for p in minorSharpSeven.pitches]
+    ['D#5', 'F#5', 'A#5']
 
-    ::
+    >>> majorFlatSix = roman.RomanNumeral('VI', em)
+    >>> [str(p) for p in majorFlatSix.pitches]
+    ['C5', 'E5', 'G5']
 
-        >>> minorSharpSeven = roman.RomanNumeral('vii', em)
-        >>> [str(p) for p in minorSharpSeven.pitches]
-        ['D#5', 'F#5', 'A#5']
-
-    ::
-
-        >>> majorFlatSix = roman.RomanNumeral('VI', em)
-        >>> [str(p) for p in majorFlatSix.pitches]
-        ['C5', 'E5', 'G5']
-
-    ::
-
-        >>> minorSharpSix = roman.RomanNumeral('vi', em)
-        >>> [str(p) for p in minorSharpSix.pitches]
-        ['C#5', 'E5', 'G#5']
+    >>> minorSharpSix = roman.RomanNumeral('vi', em)
+    >>> [str(p) for p in minorSharpSix.pitches]
+    ['C#5', 'E5', 'G#5']
 
     Either of these is the same way of getting a minor iii in a minor key:
 
-    ::
+    >>> minoriii = roman.RomanNumeral('iii', em, caseMatters=True)
+    >>> [str(p) for p in minoriii.pitches]
+    ['G4', 'B-4', 'D5']
 
-        >>> minoriii = roman.RomanNumeral('iii', em, caseMatters = True)
-        >>> [str(p) for p in minoriii.pitches]
-        ['G4', 'B-4', 'D5']
-
-    ::
-
-        >>> minoriiiB = roman.RomanNumeral('IIIb', em, caseMatters = False)
-        >>> [str(p) for p in minoriiiB.pitches]
-        ['G4', 'B-4', 'D5']
+    >>> minoriiiB = roman.RomanNumeral('IIIb', em, caseMatters=False)
+    >>> [str(p) for p in minoriiiB.pitches]
+    ['G4', 'B-4', 'D5']
 
     Can also take a scale object, here we build a first-inversion chord
     on the raised-three degree of D-flat major, that is, F#-major (late
     Schubert would be proud...)
 
-    ::
+    >>> sharp3 = roman.RomanNumeral('#III6', scale.MajorScale('D-'))
+    >>> sharp3.scaleDegreeWithAlteration
+    (3, <accidental sharp>)
 
-        >>> sharp3 = roman.RomanNumeral('#III6', scale.MajorScale('D-'))
-        >>> sharp3.scaleDegreeWithAlteration
-        (3, <accidental sharp>)
+    >>> [str(p) for p in sharp3.pitches]
+    ['A#4', 'C#5', 'F#5']
 
-    ::
+    >>> sharp3.figure
+    '#III6'
 
-        >>> [str(p) for p in sharp3.pitches]
-        ['A#4', 'C#5', 'F#5']
+    Figures can be changed and pitches will change.
 
-    ::
+    >>> sharp3.figure = "V"
+    >>> [str(p) for p in sharp3.pitches]
+    ['A-4', 'C5', 'E-5']
 
-        >>> sharp3.figure
-        '#III6'
-
-    Figures can be changed:
-
-    ::
-
-        >>> sharp3.figure = "V"
-        >>> [str(p) for p in sharp3.pitches]
-        ['A-4', 'C5', 'E-5']
-
-    ::
-
-        >>> leadingToneSeventh = roman.RomanNumeral(
-        ...     'viio', scale.MajorScale('F'))
-        >>> [str(p) for p in leadingToneSeventh.pitches]
-        ['E5', 'G5', 'B-5']
+    >>> leadingToneSeventh = roman.RomanNumeral(
+    ...     'viio', scale.MajorScale('F'))
+    >>> [str(p) for p in leadingToneSeventh.pitches]
+    ['E5', 'G5', 'B-5']
 
     A little modal mixture:
 
-    ::
+    >>> lessObviousDiminished = roman.RomanNumeral(
+    ...     'vio', scale.MajorScale('c'))
+    >>> for pitch in lessObviousDiminished.pitches:
+    ...     pitch
+    ...
+    <music21.pitch.Pitch A4>
+    <music21.pitch.Pitch C5>
+    <music21.pitch.Pitch E-5>
 
-        >>> lessObviousDiminished = roman.RomanNumeral(
-        ...     'vio', scale.MajorScale('c'))
-        >>> for pitch in lessObviousDiminished.pitches:
-        ...     pitch
-        ...
-        <music21.pitch.Pitch A4>
-        <music21.pitch.Pitch C5>
-        <music21.pitch.Pitch E-5>
+    >>> diminished7th = roman.RomanNumeral(
+    ...     'vio7', scale.MajorScale('c'))
+    >>> for pitch in diminished7th.pitches:
+    ...     pitch
+    ...
+    <music21.pitch.Pitch A4>
+    <music21.pitch.Pitch C5>
+    <music21.pitch.Pitch E-5>
+    <music21.pitch.Pitch G-5>
 
-    ::
+    >>> diminished7th1stInv = roman.RomanNumeral(
+    ...     'vio65', scale.MajorScale('c'))
+    >>> for pitch in diminished7th1stInv.pitches:
+    ...     pitch
+    ...
+    <music21.pitch.Pitch C4>
+    <music21.pitch.Pitch E-4>
+    <music21.pitch.Pitch G-4>
+    <music21.pitch.Pitch A4>
 
-        >>> diminished7th = roman.RomanNumeral(
-        ...     'vio7', scale.MajorScale('c'))
-        >>> for pitch in diminished7th.pitches:
-        ...     pitch
-        ...
-        <music21.pitch.Pitch A4>
-        <music21.pitch.Pitch C5>
-        <music21.pitch.Pitch E-5>
-        <music21.pitch.Pitch G-5>
+    >>> halfDim7th2ndInv = roman.RomanNumeral(
+    ...     'iv/o43', scale.MajorScale('F'))
+    >>> for pitch in halfDim7th2ndInv.pitches:
+    ...     pitch
+    ...
+    <music21.pitch.Pitch F-4>
+    <music21.pitch.Pitch A-4>
+    <music21.pitch.Pitch B-4>
+    <music21.pitch.Pitch D-5>
 
-    ::
+    >>> alteredChordHalfDim3rdInv = roman.RomanNumeral(
+    ...     'bii/o42', scale.MajorScale('F'))
+    >>> [str(p) for p in alteredChordHalfDim3rdInv.pitches]
+    ['F-4', 'G-4', 'B--4', 'D--5']
 
-        >>> diminished7th1stInv = roman.RomanNumeral(
-        ...     'vio65', scale.MajorScale('c'))
-        >>> for pitch in diminished7th1stInv.pitches:
-        ...     pitch
-        ...
-        <music21.pitch.Pitch C4>
-        <music21.pitch.Pitch E-4>
-        <music21.pitch.Pitch G-4>
-        <music21.pitch.Pitch A4>
+    >>> alteredChordHalfDim3rdInv.intervalVector
+    [0, 1, 2, 1, 1, 1]
 
-    ::
+    >>> alteredChordHalfDim3rdInv.commonName
+    'half-diminished seventh chord'
 
-        >>> halfDim7th2ndInv = roman.RomanNumeral(
-        ...     'iv/o43', scale.MajorScale('F'))
-        >>> for pitch in halfDim7th2ndInv.pitches:
-        ...     pitch
-        ...
-        <music21.pitch.Pitch F-4>
-        <music21.pitch.Pitch A-4>
-        <music21.pitch.Pitch B-4>
-        <music21.pitch.Pitch D-5>
+    >>> alteredChordHalfDim3rdInv.romanNumeral
+    '-ii'
 
-    ::
+    >>> alteredChordHalfDim3rdInv.romanNumeralAlone
+    'ii'
 
-        >>> alteredChordHalfDim3rdInv = roman.RomanNumeral(
-        ...     'bii/o42', scale.MajorScale('F'))
-        >>> [str(p) for p in alteredChordHalfDim3rdInv.pitches]
-        ['F-4', 'G-4', 'B--4', 'D--5']
-
-    ::
-
-        >>> alteredChordHalfDim3rdInv.intervalVector
-        [0, 1, 2, 1, 1, 1]
-
-    ::
-
-        >>> alteredChordHalfDim3rdInv.commonName
-        'half-diminished seventh chord'
-
-    ::
-
-        >>> alteredChordHalfDim3rdInv.romanNumeral
-        '-ii'
-
-    ::
-
-        >>> alteredChordHalfDim3rdInv.romanNumeralAlone
-        'ii'
-
-    ::
-
-        >>> openFifth = roman.RomanNumeral('V[no3]', key.Key('F'))
-        >>> openFifth.pitches
-        (<music21.pitch.Pitch C5>, <music21.pitch.Pitch G5>)
+    >>> openFifth = roman.RomanNumeral('V[no3]', key.Key('F'))
+    >>> openFifth.pitches
+    (<music21.pitch.Pitch C5>, <music21.pitch.Pitch G5>)
 
     Some theoretical traditions express a viio7 as a V9 chord with omitted
     root. Music21 allows that:
 
-    ::
-
-        >>> fiveOhNine = roman.RomanNumeral('V9[no1]', key.Key('g'))
-        >>> [str(p) for p in fiveOhNine.pitches]
-        ['F#5', 'A5', 'C6', 'E-6']
+    >>> fiveOhNine = roman.RomanNumeral('V9[no1]', key.Key('g'))
+    >>> [str(p) for p in fiveOhNine.pitches]
+    ['F#5', 'A5', 'C6', 'E-6']
 
     Just for kicks (no worries if this is goobley-gook):
 
-    ::
+    >>> ots = scale.OctatonicScale("C2")
+    >>> romanNumeral = roman.RomanNumeral('I9', ots, caseMatters=False)
+    >>> [str(p) for p in romanNumeral.pitches]
+    ['C2', 'E-2', 'G-2', 'A2', 'C3']
 
-        >>> ots = scale.OctatonicScale("C2")
-        >>> romanNumeral = roman.RomanNumeral('I9', ots, caseMatters=False)
-        >>> [str(p) for p in romanNumeral.pitches]
-        ['C2', 'E-2', 'G-2', 'A2', 'C3']
+    >>> romanNumeral2 = roman.RomanNumeral(
+    ...     'V7#5b3', ots, caseMatters=False)
+    >>> [str(p) for p in romanNumeral2.pitches]
+    ['G-2', 'A-2', 'C#3', 'E-3']
 
-    ::
+    >>> romanNumeral = roman.RomanNumeral('v64/V', key.Key('e'))
+    >>> romanNumeral
+    <music21.roman.RomanNumeral v64/V in e minor>
 
-        >>> romanNumeral2 = roman.RomanNumeral(
-        ...     'V7#5b3', ots, caseMatters = False)
-        >>> [str(p) for p in romanNumeral2.pitches]
-        ['G-2', 'A-2', 'C#3', 'E-3']
+    >>> romanNumeral.figure
+    'v64/V'
 
-    ::
+    >>> [str(p) for p in romanNumeral.pitches]
+    ['C#5', 'F#5', 'A5']
 
-        >>> romanNumeral = roman.RomanNumeral('v64/V', key.Key('e'))
-        >>> romanNumeral
-        <music21.roman.RomanNumeral v64/V in e minor>
-
-    ::
-
-        >>> romanNumeral.figure
-        'v64/V'
-
-    ::
-
-        >>> [str(p) for p in romanNumeral.pitches]
-        ['C#5', 'F#5', 'A5']
-
-    ::
-
-        >>> romanNumeral.secondaryRomanNumeral
-        <music21.roman.RomanNumeral V in e minor>
+    >>> romanNumeral.secondaryRomanNumeral
+    <music21.roman.RomanNumeral V in e minor>
 
     Dominant 7ths can be specified by putting d7 at end:
 
-    ::
+    >>> r = roman.RomanNumeral('bVIId7', key.Key('B-'))
+    >>> r.figure
+    'bVIId7'
 
-        >>> r = roman.RomanNumeral('bVIId7', key.Key('B-'))
-        >>> r.figure
-        'bVIId7'
+    >>> [str(p) for p in r.pitches]
+    ['A-5', 'C6', 'E-6', 'G-6']
 
-    ::
+    >>> r = roman.RomanNumeral('VId7')
+    >>> r.figure
+    'VId7'
 
-        >>> [str(p) for p in r.pitches]
-        ['A-5', 'C6', 'E-6', 'G-6']
+    >>> r.key = key.Key('B-')
+    >>> [str(p) for p in r.pitches]
+    ['G5', 'B5', 'D6', 'F6']
 
-    ::
+    >>> r2 = roman.RomanNumeral('V42/V7/vi', key.Key('C'))
+    >>> [str(p) for p in r2.pitches]
+    ['A4', 'B4', 'D#5', 'F#5']
 
-        >>> r = roman.RomanNumeral('VId7')
-        >>> r.figure
-        'VId7'
+    >>> r2.secondaryRomanNumeral
+    <music21.roman.RomanNumeral V7/vi in C major>
 
-    ::
+    >>> r2.secondaryRomanNumeral.secondaryRomanNumeral
+    <music21.roman.RomanNumeral vi in C major>
 
-        >>> r.key = key.Key('B-')
-        >>> [str(p) for p in r.pitches]
-        ['G5', 'B5', 'D6', 'F6']
-
-    ::
-
-        >>> r2 = roman.RomanNumeral('V42/V7/vi', key.Key('C'))
-        >>> [str(p) for p in r2.pitches]
-        ['A4', 'B4', 'D#5', 'F#5']
-
-    # TODO: document better! what is inherited and what is new?
 
 
     OMIT_FROM_DOCS
 
     Things that were giving us trouble:
 
-    ::
+    >>> dminor = key.Key('d')
+    >>> rn = roman.RomanNumeral('ii/o65', dminor)
+    >>> [str(p) for p in rn.pitches]
+    ['G4', 'B-4', 'D5', 'E5']
 
-        >>> dminor = key.Key('d')
-        >>> rn = roman.RomanNumeral('ii/o65', dminor)
-        >>> [str(p) for p in rn.pitches]
-        ['G4', 'B-4', 'D5', 'E5']
+    >>> rn.romanNumeral
+    'ii'
 
-    ::
-
-        >>> rn.romanNumeral
-        'ii'
-
-    ::
-
-        >>> rn3 = roman.RomanNumeral('III', dminor)
-        >>> [str(p) for p in rn3.pitches]
-        ['F4', 'A4', 'C5']
+    >>> rn3 = roman.RomanNumeral('III', dminor)
+    >>> [str(p) for p in rn3.pitches]
+    ['F4', 'A4', 'C5']
 
     Should be the same as above no matter when the key is set:
 
-    ::
+    >>> r = roman.RomanNumeral('VId7', key.Key('B-'))
+    >>> [str(p) for p in r.pitches]
+    ['G5', 'B5', 'D6', 'F6']
 
-        >>> r = roman.RomanNumeral('VId7', key.Key('B-'))
-        >>> [str(p) for p in r.pitches]
-        ['G5', 'B5', 'D6', 'F6']
-
-    ::
-
-        >>> r.key = key.Key('B-')
-        >>> [str(p) for p in r.pitches]
-        ['G5', 'B5', 'D6', 'F6']
+    >>> r.key = key.Key('B-')
+    >>> [str(p) for p in r.pitches]
+    ['G5', 'B5', 'D6', 'F6']
 
     This was getting B-flat.
 
-    ::
+    >>> r = roman.RomanNumeral('VId7')
+    >>> r.key = key.Key('B-')
+    >>> [str(p) for p in r.pitches]
+    ['G5', 'B5', 'D6', 'F6']
 
-        >>> r = roman.RomanNumeral('VId7')
-        >>> r.key = key.Key('B-')
-        >>> [str(p) for p in r.pitches]
-        ['G5', 'B5', 'D6', 'F6']
-
-    ::
-
-        >>> r = roman.RomanNumeral('vio', em)
-        >>> [str(p) for p in r.pitches]
-        ['C#5', 'E5', 'G5']
+    >>> r = roman.RomanNumeral('vio', em)
+    >>> [str(p) for p in r.pitches]
+    ['C#5', 'E5', 'G5']
 
     We can omit an arbitrary number of steps:
 
-    ::
+    >>> r = roman.RomanNumeral('Vd7[no3no5no7]', key.Key('C'))
+    >>> [str(pitch) for pitch in r.pitches]
+    ['G4']
 
-        >>> r = roman.RomanNumeral('Vd7[no3no5no7]', key.Key('C'))
-        >>> [str(pitch) for pitch in r.pitches]
-        ['G4']
 
+    Accepts a keyword 'updatePitches' which is passed to harmony.Harmony. By default it
+    is True, but can be set to False to initialize faster if pitches are not needed.
+
+    >>> r = roman.RomanNumeral('vio', em, updatePitches=False)
+    >>> r.pitches
+    ()
     '''
+    # TODO: document better! what is inherited and what is new?
 
-    _alterationRegex = re.compile('^(b+|\-+|\#+)')
-    _omittedStepsRegex = re.compile('(\[(no[1-9])+\]\s*)+')
-    _bracketedAlterationRegex =  re.compile('\[(b+|\-+|\#+)(\d+)\]')
-    _augmentedSixthRegex = re.compile('(It|Ger|Fr|Sw)')
-    _romanNumeralAloneRegex = \
-        re.compile('(IV|I{1,3}|VI{0,2}|iv|i{1,3}|vi{0,2}|N)')
-    _secondarySlashRegex = re.compile('(.*?)\/([\#a-np-zA-NP-Z].*)')
+    _alterationRegex = re.compile(r'^(b+|\-+|\#+)')
+    _omittedStepsRegex = re.compile(r'(\[(no[1-9]+)+\]\s*)+')
+    _bracketedAlterationRegex =  re.compile(r'\[(b+|\-+|\#+)(\d+)\]')
+    _augmentedSixthRegex = re.compile(r'(It|Ger|Fr|Sw)')
+    _romanNumeralAloneRegex = re.compile(r'(IV|I{1,3}|VI{0,2}|iv|i{1,3}|vi{0,2}|N)')
+    _secondarySlashRegex = re.compile(r'(.*?)\/([\#a-np-zA-NP-Z].*)')
 
     _DOC_ATTR = {
         'scaleCardinality': '''
@@ -1133,7 +1142,7 @@ class RomanNumeral(harmony.Harmony):
 
     ### INITIALIZER ###
 
-    def __init__(self, figure=None, keyOrScale=None, caseMatters=True):
+    def __init__(self, figure=None, keyOrScale=None, caseMatters=True, **keywords):
         self.primaryFigure = None
         self.secondaryRomanNumeral = None
         self.secondaryRomanNumeralKey = None
@@ -1150,14 +1159,24 @@ class RomanNumeral(harmony.Harmony):
         self._figure = figure
         # This is set when _setKeyOrScale() is called:
         self._scale = None
+        self.scaleDegree = None
+        self.frontAlterationString = None
+        self.frontAlterationTransposeInterval = None
+        self.frontAlterationAccidental = None
+        self.romanNumeralAlone = None
+        
+        self.impliedQuality = None
         self.impliedScale = None
         self.useImpliedScale = False
         self.bracketedAlterations = None
-
+        self.omittedSteps = []
+        # do not update pitches...
         self._parsingComplete = False
         self.key = keyOrScale
 
-        harmony.Harmony.__init__(self, figure)
+        updatePitches = keywords.get('updatePitches', True)
+        super(RomanNumeral, self).__init__(figure, updatePitches=updatePitches)
+
         self._correctBracketedPitches()
         self._parsingComplete = True
         self._functionalityScore = None
@@ -1173,31 +1192,96 @@ class RomanNumeral(harmony.Harmony):
         else:
             return '<music21.roman.RomanNumeral %s>' % (self.figure)
 
-    ### PRIVATE METHODS ###
+    ### PRIVATE METHODS ###    
+    def _parseFigure(self):
+        '''
+        Parse the .figure object into its component parts.
+
+        Called from the superclass, Harmony.__init__()
+        '''
+        if not isinstance(self._figure, six.string_types):
+            raise RomanException('got a non-string figure: {!r}'.format(self._figure))
+
+        if not self.useImpliedScale:
+            useScale = self._scale
+        else:
+            useScale = self.impliedScale
+
+        (workingFigure, useScale) = self._correctForSecondaryRomanNumeral(useScale)
+        self.primaryFigure = workingFigure
+        
+        workingFigure = self._parseOmittedSteps(workingFigure)
+        workingFigure = self._parseBracketedAlterations(workingFigure)
+
+        # Replace Neapolitan indication.
+        workingFigure = re.sub('^N', 'bII', workingFigure)
+
+        workingFigure = self._parseFrontAlterations(workingFigure)
+        workingFigure, useScale = self._parseRNAloneAmidstAug6(workingFigure, useScale)
+        workingFigure = self._setImpliedQualityFromString(workingFigure)
+
+        self._fixMinorVIandVII(useScale)
+
+        self.figuresWritten = workingFigure
+        shfig = ','.join(expandShortHand(workingFigure))
+        self.figuresNotationObj = fbNotation.Notation(shfig)
+
+    def _setImpliedQualityFromString(self, workingFigure):
+        # major, minor, augmented, or diminished (and half-diminished for 7ths)
+        impliedQuality = ''
+        #impliedQualitySymbol = ''
+        if workingFigure.startswith('o'):
+            workingFigure = workingFigure[1:]
+            impliedQuality = 'diminished'
+            #impliedQualitySymbol = 'o'
+        elif workingFigure.startswith('/o'):
+            workingFigure = workingFigure[2:]
+            impliedQuality = 'half-diminished'
+            #impliedQualitySymbol = '/o'
+        elif workingFigure.startswith('+'):
+            workingFigure = workingFigure[1:]
+            impliedQuality = 'augmented'
+            #impliedQualitySymbol = '+'
+        elif workingFigure.endswith('d7'):
+            # this one is different
+            workingFigure = workingFigure[:-2] + '7'
+            impliedQuality = 'dominant-seventh'
+            #impliedQualitySymbol = '(dom7)'
+        elif (self.caseMatters
+              and self.romanNumeralAlone.upper() == self.romanNumeralAlone):
+            impliedQuality = 'major'
+        elif (self.caseMatters
+              and self.romanNumeralAlone.lower() == self.romanNumeralAlone):
+            impliedQuality = 'minor'
+        self.impliedQuality = impliedQuality
+        return workingFigure
+
     def _correctBracketedPitches(self):
         # correct bracketed figures
-        if (self.bracketedAlterations is not None):
-            for (alterNotation, chordStep) in self.bracketedAlterations:
-                alterNotation = re.sub('b','-', alterNotation)
-                alterPitch = self.getChordStep(chordStep)
-                if alterPitch is not None:
-                    newAccidental = pitch.Accidental(alterNotation)
-                    if alterPitch.accidental is None:
-                        alterPitch.accidental = newAccidental
-                    else:
-                        alterPitch.accidental.set(alterPitch.accidental.alter + newAccidental.alter)
+        if self.bracketedAlterations is None:
+            return
+        for (alterNotation, chordStep) in self.bracketedAlterations:
+            alterNotation = re.sub('b', '-', alterNotation)
+            alterPitch = self.getChordStep(chordStep)
+            if alterPitch is not None:
+                newAccidental = pitch.Accidental(alterNotation)
+                if alterPitch.accidental is None:
+                    alterPitch.accidental = newAccidental
+                else:
+                    alterPitch.accidental.set(alterPitch.accidental.alter + newAccidental.alter)
 
     def _findSemitoneSizeForQuality(self, impliedQuality):
         '''
         Given an implied quality, return the number of semitones that should be included.
-        
+
         Relies entirely on impliedQuality. Note that in the case of 'diminished'
         it could be either diminished triad or diminished seventh. We return for diminished
         seventh since a missing chordStep for the 7th degree doesn't affect the processing.
-        
-        Returns a tuple of 2 or 3 length showing the number of semitones for third, fifth, [seventh]
+
+        Returns a tuple of 2 or 3 length showing the number of
+        semitones for third, fifth, [seventh]
         or the empty tuple () if not found.
-        
+
         >>> r = roman.RomanNumeral()
         >>> r._findSemitoneSizeForQuality('major')
         (4, 7)
@@ -1230,8 +1314,8 @@ class RomanNumeral(harmony.Harmony):
             correctSemitones = ()
 
         return correctSemitones
-    
-        
+
+
 
     def _matchAccidentalsToQuality(self, impliedQuality):
         '''
@@ -1239,8 +1323,8 @@ class RomanNumeral(harmony.Harmony):
         based on what the chord "impliedQuality" (major, minor, augmented,
         diminished) by changing their accidental.
 
-        An intermediary step in parsing figures.        
-        
+        An intermediary step in parsing figures.
+
         >>> r = roman.RomanNumeral()
         >>> r.pitches = ['C4', 'E4', 'G4']
         >>> r._matchAccidentalsToQuality('minor')
@@ -1255,16 +1339,14 @@ class RomanNumeral(harmony.Harmony):
         >>> r.pitches = ['C4', 'E4', 'G4', 'B4']
         >>> r._matchAccidentalsToQuality('diminished')
         >>> " ".join([p.name for p in r.pitches])
-        'C E- G- B--'        
-        
+        'C E- G- B--'
+
         This was a problem before...
-        
+
         >>> r.pitches = ['C4', 'E4', 'G4', 'B#4']
         >>> r._matchAccidentalsToQuality('diminished')
         >>> " ".join([p.name for p in r.pitches])
-        'C E- G- B--'        
-
-
+        'C E- G- B--'
         '''
         correctSemitones = self._findSemitoneSizeForQuality(impliedQuality)
         chordStepsToExamine = (3, 5, 7)
@@ -1281,10 +1363,11 @@ class RomanNumeral(harmony.Harmony):
                     correctedSemis = -1* (12 - correctedSemis)
                 elif correctedSemis <= -6:
                     correctedSemis += 12
-                    
+
                 faultyPitch = self.getChordStep(thisChordStep)
                 if faultyPitch is None:
-                    raise RomanException("this is very odd... should have been caught in semitonesFromChordStep")
+                    raise RomanException(
+                        "this is very odd... should have been caught in semitonesFromChordStep")
                 if faultyPitch.accidental is None:
                     faultyPitch.accidental = pitch.Accidental(correctedSemis)
                 else:
@@ -1295,20 +1378,20 @@ class RomanNumeral(harmony.Harmony):
                     elif correctedSemis <= -6:
                         correctedSemis += 12
 
-                    acc.set(correctedSemis)                        
+                    acc.set(correctedSemis)
 
 
-    def _correctForSecondaryRomanNumeral(self, useScale, figure = None):
+    def _correctForSecondaryRomanNumeral(self, useScale, figure=None):
         '''
         Creates .secondaryRomanNumeral object and .secondaryRomanNumeralKey Key object
         inside the RomanNumeral object (recursively in case of V/V/V/V etc.) and returns
         the figure and scale that should be used instead of figure for further working.
-        
+
         Returns a tuple of (newFigure, newScale).
         In case there is no secondary slash, returns the original figure and the original scale.
-        
+
         If figure is None, uses newFigure.
-        
+
         >>> k = key.Key('C')
         >>> r = roman.RomanNumeral('I', k) # will not be used below...
         >>> r._correctForSecondaryRomanNumeral(k) # uses "I". nothing should change...
@@ -1343,8 +1426,6 @@ class RomanNumeral(harmony.Harmony):
         <music21.roman.RomanNumeral V in C major>
         >>> r.secondaryRomanNumeral.secondaryRomanNumeralKey
         <music21.key.Key of G major>
-
-
         '''
         if figure is None:
             figure = self._figure
@@ -1366,8 +1447,8 @@ class RomanNumeral(harmony.Harmony):
                 secondaryMode = 'minor'
             else:
                 secondaryMode = 'major'
-                
-            ### TODO: this should use a KeyCache... 
+
+            ### TODO: this should use a KeyCache...
             ###   but lower priority since secondaries are relatively rare
             self.secondaryRomanNumeralKey = key.Key(
                 secondaryRomanNumeral.root().name,
@@ -1377,41 +1458,52 @@ class RomanNumeral(harmony.Harmony):
             workingFigure = primaryFigure
         else:
             workingFigure = figure
-        
+
         return (workingFigure, useScale)
 
-
-    def _parseFigure(self):
+    def _parseOmittedSteps(self, workingFigure):
         '''
-        Parse the .figure object into its component parts.
+        Remove omitted steps from a working figure and return the omitted parts,
+        setting self.omittedSteps
         
-        Called from the superclass, Harmony.__init__()
+        >>> rn = roman.RomanNumeral()
+        >>> rn._parseOmittedSteps('7[no5][no3]')
+        '7'
+        >>> rn.omittedSteps
+        [5, 3]
+        
+        All omitted are mod 7:
+        
+        >>> rn = roman.RomanNumeral()
+        >>> rn._parseOmittedSteps('13[no11][no9][no7]b3')
+        '13b3'
+        >>> rn.omittedSteps
+        [4, 2, 7]
         
         '''
-        if not common.isStr(self._figure):
-            raise RomanException('got a non-string figure: {!r}'.format(
-                self._figure))
-
-        if not self.useImpliedScale:
-            useScale = self._scale
-        else:
-            useScale = self.impliedScale
-
-        (workingFigure, useScale) = self._correctForSecondaryRomanNumeral(useScale)        
-        self.primaryFigure = workingFigure
-        
-
         omittedSteps = []
         match = self._omittedStepsRegex.search(workingFigure)
         if match:
             group = match.group()
             group = group.replace(' ', '')
             group = group.replace('][', '')
-            omittedSteps = [int(x) for x in group[1:-1].split('no')
-                if x]
+            omittedSteps = [(int(x) % 7 or 7) for x in group[1:-1].split('no') if x]
+            # environLocal.printDebug(self.figure + ' omitting: ' + str(omittedSteps))
             workingFigure = self._omittedStepsRegex.sub('', workingFigure)
         self.omittedSteps = omittedSteps
-
+        return workingFigure
+    
+    def _parseBracketedAlterations(self, workingFigure):
+        '''
+        remove bracketed alterations from a figure and store them in `.bracketedAlterations`
+        
+        >>> rn = roman.RomanNumeral()
+        >>> rn._parseBracketedAlterations('7[#5][b3]')
+        '7'
+        >>> rn.bracketedAlterations
+        [('#', 5), ('b', 3)]
+        
+        '''
         matches = self._bracketedAlterationRegex.finditer(workingFigure)
         for m in matches:
             if self.bracketedAlterations is None:
@@ -1421,11 +1513,27 @@ class RomanNumeral(harmony.Harmony):
             newTuple = (matchAlteration, matchDegree)
             self.bracketedAlterations.append(newTuple)
         workingFigure = self._bracketedAlterationRegex.sub('', workingFigure)
+        return workingFigure
 
-
-        # Replace Neapolitan indication.
-        workingFigure = re.sub('^N', 'bII', workingFigure)
-
+    def _parseFrontAlterations(self, workingFigure):
+        '''
+        removes front alterations from a workingFigure and sets
+        `.frontAlterationString`, `.frontAlterationTransposeInterval`
+        and `.frontAlterationAccidental`.
+        
+        >>> rn = roman.RomanNumeral()
+        >>> print(rn.frontAlterationTransposeInterval)
+        None
+         
+        >>> rn._parseFrontAlterations('bVI')
+        'VI'
+        >>> rn.frontAlterationString
+        'b'
+        >>> rn.frontAlterationTransposeInterval
+        <music21.interval.Interval d1>
+        >>> rn.frontAlterationAccidental
+        <accidental flat>  
+        '''
         frontAlterationString = ''  # the b in bVI, or the # in #vii
         frontAlterationTransposeInterval = None
         frontAlterationAccidental = None
@@ -1435,8 +1543,7 @@ class RomanNumeral(harmony.Harmony):
             alteration = len(group)
             if group[0] in ('b', '-'):
                 alteration *= -1  # else sharp...
-            frontAlterationTransposeInterval = \
-                interval.intervalFromGenericAndChromatic(
+            frontAlterationTransposeInterval = interval.intervalFromGenericAndChromatic(
                     interval.GenericInterval(1),
                     interval.ChromaticInterval(alteration),
                     )
@@ -1444,12 +1551,37 @@ class RomanNumeral(harmony.Harmony):
             frontAlterationString = group
             workingFigure = self._alterationRegex.sub('', workingFigure)
         self.frontAlterationString = frontAlterationString
-        self.frontAlterationTransposeInterval = \
-            frontAlterationTransposeInterval
+        self.frontAlterationTransposeInterval = frontAlterationTransposeInterval
         self.frontAlterationAccidental = frontAlterationAccidental
+        return workingFigure
+    
+    def _parseRNAloneAmidstAug6(self, workingFigure, useScale):
+        '''
+        Sets and removes from workingFigure the roman numeral alone, possibly
+        changing the useScale in the case of augmented sixths.
+        
+        Returns the remains of the figure alone with the scale to be used
+        
+        >>> useScale = key.Key('C')
+        >>> rn = roman.RomanNumeral()
+        >>> workingFig, outScale = rn._parseRNAloneAmidstAug6('V7', useScale)
+        >>> workingFig
+        '7'
+        >>> outScale is useScale
+        True
+        >>> rn.romanNumeralAlone
+        'V'
 
+        >>> rn = roman.RomanNumeral()
+        >>> workingFig, outScale = rn._parseRNAloneAmidstAug6('Fr+6', useScale)
+        >>> workingFig
+        '+6'
+        >>> outScale
+        <music21.key.Key of c minor>
+        '''
         romanNumeralAlone = ''
-        if not self._romanNumeralAloneRegex.match(workingFigure) and not self._augmentedSixthRegex.match(workingFigure):
+        if (not self._romanNumeralAloneRegex.match(workingFigure)
+                and not self._augmentedSixthRegex.match(workingFigure)):
             raise RomanException('No roman numeral found in {!r}'.format(
                 workingFigure))
         elif self._augmentedSixthRegex.match(workingFigure):
@@ -1467,14 +1599,14 @@ class RomanNumeral(harmony.Harmony):
             self.romanNumeralAlone = romanNumeralAlone
             if self.bracketedAlterations is None:
                 self.bracketedAlterations = []
-            
+
             if romanNumeralAlone != 'Fr':
                 fixTuple = ('#', 1)
                 self.bracketedAlterations.append(fixTuple)
-            if romanNumeralAlone in ('Fr','Sw'):
+            if romanNumeralAlone in ('Fr', 'Sw'):
                 fixTuple = ('#', 3)
                 self.bracketedAlterations.append(fixTuple)
-                
+
         else:
             rm = self._romanNumeralAloneRegex.match(workingFigure)
             romanNumeralAlone = rm.group(1)
@@ -1482,56 +1614,41 @@ class RomanNumeral(harmony.Harmony):
             workingFigure = self._romanNumeralAloneRegex.sub('', workingFigure)
             self.romanNumeralAlone = romanNumeralAlone
 
-        workingFigure = self._setImpliedQualityFromString(workingFigure)
-
+        return workingFigure, useScale
+    
+    def _fixMinorVIandVII(self, useScale):
+        '''
+        fix minor vi and vii to always be #vi and #vii if `.caseMatters`.
+        
+        >>> rn = roman.RomanNumeral()
+        >>> rn.scaleDegree = 6
+        >>> rn.impliedQuality = 'minor'
+        >>> rn._fixMinorVIandVII(key.Key('c'))
+        
+        >>> rn.frontAlterationTransposeInterval
+        <music21.interval.Interval A1>
+        
+        >>> rn.frontAlterationAccidental
+        <accidental sharp>
+        '''
         # Make vii always #vii and vi always #vi.
-        if getattr(useScale, 'mode', None) == 'minor' \
-            and self.caseMatters:
-            if (self.scaleDegree == 6 or self.scaleDegree == 7) and self.impliedQuality in (
-                'minor', 'diminished', 'half-diminished'):
-                if (self.frontAlterationTransposeInterval):
-                    self.frontAlterationTransposeInterval = interval.add([self.frontAlterationTransposeInterval,
-                                                                          interval.Interval('A1')
-                                                                          ])
-                    self.frontAlterationAccidental.alter = self.frontAlterationAccidental.alter + 1
-                else:
-                    self.frontAlterationTransposeInterval = interval.Interval('A1')
-                    self.frontAlterationAccidental = pitch.Accidental(1)
-
-
-        self.figuresWritten = workingFigure
-        shfig = ','.join(expandShortHand(workingFigure))
-        self.figuresNotationObj = fbNotation.Notation(shfig)
-
-    def _setImpliedQualityFromString(self, workingFigure):
-        # major, minor, augmented, or diminished (and half-diminished for 7ths)
-        impliedQuality = ''
-        #impliedQualitySymbol = ''
-        if workingFigure.startswith('o'):
-            workingFigure = workingFigure[1:]
-            impliedQuality = 'diminished'
-            #impliedQualitySymbol = 'o'
-        elif workingFigure.startswith('/o'):
-            workingFigure = workingFigure[2:]
-            impliedQuality = 'half-diminished'
-            #impliedQualitySymbol = '/o'
-        elif workingFigure.startswith('+'):
-            workingFigure = workingFigure[1:]
-            impliedQuality = 'augmented'
-            #impliedQualitySymbol = '+'
-        elif workingFigure.endswith('d7'):
-            # this one is different
-            workingFigure = workingFigure[:-2] + '7'
-            impliedQuality = 'dominant-seventh'
-            #impliedQualitySymbol = '(dom7)'
-        elif self.caseMatters and \
-            self.romanNumeralAlone.upper() == self.romanNumeralAlone:
-            impliedQuality = 'major'
-        elif self.caseMatters and \
-            self.romanNumeralAlone.lower() == self.romanNumeralAlone:
-            impliedQuality = 'minor'
-        self.impliedQuality = impliedQuality
-        return workingFigure
+        if getattr(useScale, 'mode', None) != 'minor':
+            return
+        if not self.caseMatters:
+            return
+        if self.scaleDegree not in (6, 7):
+            return
+        if self.impliedQuality not in ('minor', 'diminished', 'half-diminished'):
+            return
+        
+        fati = self.frontAlterationTransposeInterval
+        if fati:        
+            newFati = interval.add([fati, interval.Interval('A1')])
+            self.frontAlterationTransposeInterval = newFati
+            self.frontAlterationAccidental.alter = self.frontAlterationAccidental.alter + 1
+        else:
+            self.frontAlterationTransposeInterval = interval.Interval('A1')
+            self.frontAlterationAccidental = pitch.Accidental(1)
 
     def _updatePitches(self):
         '''
@@ -1561,12 +1678,12 @@ class RomanNumeral(harmony.Harmony):
 
         for j in range(numberNotes):
             i = numberNotes - j - 1
-            thisscaleDegree = bassScaleDegree + \
-                self.figuresNotationObj.numbers[i] - 1
+            thisscaleDegree = (bassScaleDegree
+                                + self.figuresNotationObj.numbers[i]
+                                - 1)
             newPitch = useScale.pitchFromDegree(thisscaleDegree,
-                direction=scale.DIRECTION_ASCENDING)
-            pitchName = self.figuresNotationObj.modifiers[i].modifyPitchName(
-                newPitch.name)
+                                                direction=scale.DIRECTION_ASCENDING)
+            pitchName = self.figuresNotationObj.modifiers[i].modifyPitchName(newPitch.name)
             newnewPitch = pitch.Pitch(pitchName)
             newnewPitch.octave = newPitch.octave
             #if newnewPitch.midi < lastPitch.midi:
@@ -1579,8 +1696,7 @@ class RomanNumeral(harmony.Harmony):
         if self.frontAlterationTransposeInterval:
             newPitches = []
             for thisPitch in pitches:
-                newPitch = thisPitch.transpose(
-                    self.frontAlterationTransposeInterval)
+                newPitch = thisPitch.transpose(self.frontAlterationTransposeInterval)
                 newPitches.append(newPitch)
             self.pitches = newPitches
         else:
@@ -1597,13 +1713,14 @@ class RomanNumeral(harmony.Harmony):
                 p = self.getChordStep(thisCS)
                 if p not in [False, None]:
                     omittedPitches.append(p.name)
+
             newPitches = []
             for thisPitch in pitches:
                 if thisPitch.name not in omittedPitches:
                     newPitches.append(thisPitch)
             self.pitches = newPitches
 
-        if len(self.pitches) == 0:
+        if not self.pitches:
             raise RomanNumeralException(
                 '_updatePitches() was unable to derive pitches from the '
                 'figure: {0!r}'.format(self.figure))
@@ -1617,12 +1734,10 @@ class RomanNumeral(harmony.Harmony):
         II) or the frontAlterationAccidental.modifier + romanNumeralAlone (e.g.
         #II)
 
-        ::
-
-            >>> from music21 import roman
-            >>> rn = roman.RomanNumeral("#II7")
-            >>> rn.romanNumeral
-            '#II'
+        >>> from music21 import roman
+        >>> rn = roman.RomanNumeral("#II7")
+        >>> rn.romanNumeral
+        '#II'
 
         '''
         if self.frontAlterationAccidental is None:
@@ -1650,12 +1765,10 @@ class RomanNumeral(harmony.Harmony):
         '''
         Returns the figure and the key and mode as a string
 
-        ::
-
-            >>> from music21 import roman
-            >>> rn = roman.RomanNumeral('V65/V', 'e')
-            >>> rn.figureAndKey
-            'V65/V in e minor'
+        >>> from music21 import roman
+        >>> rn = roman.RomanNumeral('V65/V', 'e')
+        >>> rn.figureAndKey
+        'V65/V in e minor'
 
         '''
         tonic = self.key.tonic
@@ -1684,47 +1797,35 @@ class RomanNumeral(harmony.Harmony):
 
         If a new key is set, then the pitches will probably change:
 
-        ::
+        >>> from music21 import roman
+        >>> r1 = roman.RomanNumeral('V')
 
-            >>> from music21 import roman
-            >>> r1 = roman.RomanNumeral('V')
+        (No key means an implicit C-major)
 
-        (implicit C-major)
+        >>> r1.key is None
+        True
 
-        ::
-
-            >>> [str(p) for p in r1.pitches]
-            ['G4', 'B4', 'D5']
+        >>> [str(p) for p in r1.pitches]
+        ['G4', 'B4', 'D5']
 
         Change to A major
 
-        ::
+        >>> r1.key = key.Key('A')
+        >>> [str(p) for p in r1.pitches]
+        ['E5', 'G#5', 'B5']
 
-            >>> r1.key = key.Key('A')
-            >>> [str(p) for p in r1.pitches]
-            ['E5', 'G#5', 'B5']
+        >>> r1
+        <music21.roman.RomanNumeral V in A major>
 
-        ::
+        >>> r1.key
+        <music21.key.Key of A major>
 
-            >>> r1
-            <music21.roman.RomanNumeral V in A major>
+        >>> r1.key = key.Key('e')
+        >>> [str(p) for p in r1.pitches]
+        ['B4', 'D#5', 'F#5']
 
-        ::
-
-            >>> r1.key
-            <music21.key.Key of A major>
-
-        ::
-
-            >>> r1.key = key.Key('e')
-            >>> [str(p) for p in r1.pitches]
-            ['B4', 'D#5', 'F#5']
-
-        ::
-
-            >>> r1
-            <music21.roman.RomanNumeral V in e minor>
-
+        >>> r1
+        <music21.roman.RomanNumeral V in e minor>
         '''
         return self._scale
 
@@ -1734,14 +1835,13 @@ class RomanNumeral(harmony.Harmony):
         Provide a new key or scale, and re-configure the RN with the
         existing figure.
         '''
+        if keyOrScale == self._scale and keyOrScale is not None:
+            return # skip...
+
         # try to get Scale or Key object from cache: this will offer
         # performance boost as Scale stores cached pitch segments
-        if common.isStr(keyOrScale):
-            if keyOrScale in _keyCache:
-                keyOrScale = _keyCache[keyOrScale]
-            else:
-                keyOrScale = key.Key(keyOrScale)
-                _keyCache[keyOrScale.name] = keyOrScale
+        if isinstance(keyOrScale, six.string_types):
+            keyOrScale = _getKeyFromCache(keyOrScale)
         elif keyOrScale is not None:
             #environLocal.printDebug(['got keyOrScale', keyOrScale])
             try:
@@ -1751,11 +1851,10 @@ class RomanNumeral(harmony.Harmony):
                     'Cannot call classes on object {0!r}, send only Key '
                     'or Scale Music21Objects'.format(keyOrScale))
             if 'Key' in keyClasses:
-                if keyOrScale.name in _keyCache:
-                    # use stored scale as already has cache
-                    keyOrScale = _keyCache[keyOrScale.name]
-                else:
-                    _keyCache[keyOrScale.name] = keyOrScale
+                # good to go...
+                if keyOrScale.tonicPitchNameWithCase not in _keyCache:
+                    # store for later
+                    _keyCache[keyOrScale.tonicPitchNameWithCase] = keyOrScale
             elif 'Scale' in keyClasses:
                 if keyOrScale.name in _scaleCache:
                     # use stored scale as already has cache
@@ -1767,11 +1866,12 @@ class RomanNumeral(harmony.Harmony):
                     'Cannot get a key from this object {0!r}, send only '
                     'Key or Scale objects'.format(keyOrScale))
         else:
-            pass
+            pass # None
             # cache object if passed directly
         self._scale = keyOrScale
-        if keyOrScale is None or (hasattr(keyOrScale, "isConcrete") and
-            not keyOrScale.isConcrete):
+        if (keyOrScale is None
+                or (hasattr(keyOrScale, "isConcrete")
+                and not keyOrScale.isConcrete)):
             self.useImpliedScale = True
             if self._scale is not None:
                 self.impliedScale = self._scale.derive(1, 'C')
@@ -1796,23 +1896,19 @@ class RomanNumeral(harmony.Harmony):
 #        Invert the harmony one position, or place the next member after the
 #        current bass as the bass:
 #
-#        ::
 #
-#            >>> sc1 = scale.MajorScale('g4')
-#            >>> h1 = scale.RomanNumeral(sc1, 5)
-#            >>> h1.getPitches()
-#            [D5, F#5, A5]
 #
-#        ::
+#        >>> sc1 = scale.MajorScale('g4')
+#        >>> h1 = scale.RomanNumeral(sc1, 5)
+#        >>> h1.getPitches()
+#        [D5, F#5, A5]
 #
-#            >>> h1.nextInversion()
-#            >>> h1._bassMemberIndex
-#            1
+#        >>> h1.nextInversion()
+#        >>> h1._bassMemberIndex
+#        1
 #
-#        ::
-#
-#            >>> h1.getPitches()
-#            [F#5, A5, D6]
+#        >>> h1.getPitches()
+#        [F#5, A5, D6]
 #
 #        '''
 #        self._bassMemberIndex = ((self._bassMemberIndex + 1) %
@@ -1841,41 +1937,34 @@ class RomanNumeral(harmony.Harmony):
             self._updatePitches()
 
 
-    def bassScaleDegreeFromNotation(self, notationObject = None):
+    def bassScaleDegreeFromNotation(self, notationObject=None):
         '''
         Given a notationObject from
         :class:`music21.figuredBass.notation.Notation`
         return the scaleDegree of the bass.
 
-        ::
+        >>> from music21 import figuredBass, roman
+        >>> fbn = figuredBass.notation.Notation('6,3')
+        >>> V = roman.RomanNumeral('V')
+        >>> V.bassScaleDegreeFromNotation(fbn)
+        7
 
-            >>> from music21 import figuredBass, roman
-            >>> fbn = figuredBass.notation.Notation('6,3')
-            >>> V = roman.RomanNumeral('V')
-            >>> V.bassScaleDegreeFromNotation(fbn)
-            7
-
-        ::
-
-            >>> fbn2 = figuredBass.notation.Notation('#6,4')
-            >>> vi = roman.RomanNumeral('vi')
-            >>> vi.bassScaleDegreeFromNotation(fbn2)
-            3
+        >>> fbn2 = figuredBass.notation.Notation('#6,4')
+        >>> vi = roman.RomanNumeral('vi')
+        >>> vi.bassScaleDegreeFromNotation(fbn2)
+        3
 
         Can figure it out directly from an existing RomanNumeral:
-        
-        ::
-        
-            >>> ii65 = roman.RomanNumeral('ii65', 'C')
-            >>> ii65.bassScaleDegreeFromNotation()
-            4
-            
+
+        >>> ii65 = roman.RomanNumeral('ii65', 'C')
+        >>> ii65.bassScaleDegreeFromNotation()
+        4
+
         Simple test:
-        
-        ::
-            >>> I = roman.RomanNumeral('I')
-            >>> I.bassScaleDegreeFromNotation()
-            1
+
+        >>> I = roman.RomanNumeral('I')
+        >>> I.bassScaleDegreeFromNotation()
+        1
 
 
         A bit slow (6 seconds for 1000 operations, but not the bottleneck)
@@ -1913,28 +2002,50 @@ class RomanNumeral(harmony.Harmony):
 
         Numbers are ordinal, not cardinal.
 
-        ::
+        >>> from music21 import roman
+        >>> rn1 = roman.RomanNumeral('V7')
+        >>> rn1.functionalityScore
+        80
 
-            >>> from music21 import roman
-            >>> rn1 = roman.RomanNumeral('V7')
-            >>> rn1.functionalityScore
-            80
+        >>> rn2 = roman.RomanNumeral('vi6')
+        >>> rn2.functionalityScore
+        10
 
-        ::
-
-            >>> rn2 = roman.RomanNumeral('vi6')
-            >>> rn2.functionalityScore
-            10
-
-        ::
-
-            >>> rn2.functionalityScore = 99
-            >>> rn2.functionalityScore
-            99
-
+        >>> rn2.functionalityScore = 99
+        >>> rn2.functionalityScore
+        99
+        
+        For secondary dominants, the functionality scores are multiplied, reducing
+        all but the first by 1/100th:
+        
+        >>> rn3 = roman.RomanNumeral('V')
+        >>> rn3.functionalityScore
+        70
+        
+        >>> rn4 = roman.RomanNumeral('vi')
+        >>> rn4.functionalityScore
+        40
+        
+        >>> rn5 = roman.RomanNumeral('V/vi')
+        >>> rn5.functionalityScore
+        28
         '''
         if self._functionalityScore is not None:
             return self._functionalityScore
+        
+        if self.secondaryRomanNumeral:
+            figures = self.figure.split('/') # error for half-diminished in secondary...
+            score = 100
+            for f in figures:
+                try:
+                    scorePart = functionalityScores[f] / 100
+                except KeyError:
+                    scorePart = 0
+                score *= scorePart
+            return int(score)
+        
+        
+        
         try:
             score = functionalityScores[self.figure]
         except KeyError:
@@ -2007,11 +2118,15 @@ class Test(unittest.TestCase):
         self.assertEqual(rnOmit.pitches, chord.Chord(['A4', 'C#5']).pitches)
         rnOmit = RomanNumeral('V[no3no5]', dminor)
         self.assertEqual(rnOmit.pitches, chord.Chord(['A4']).pitches)
+        rnOmit = RomanNumeral('V13[no11]', key.Key('C'))
+        self.assertEqual(rnOmit.pitches, chord.Chord('G4 B4 D5 F5 A5 E5').pitches)
 
     def testBracketedAlterations(self):
         r1 = RomanNumeral('V9[b7][b5]')
         self.assertEqual(str(r1.bracketedAlterations), "[('b', 7), ('b', 5)]")
-        self.assertEqual(str(r1.pitches), '(<music21.pitch.Pitch G4>, <music21.pitch.Pitch B4>, <music21.pitch.Pitch D-5>, <music21.pitch.Pitch F-5>, <music21.pitch.Pitch A5>)')
+        self.assertEqual(str(r1.pitches),
+            '(<music21.pitch.Pitch G4>, <music21.pitch.Pitch B4>, <music21.pitch.Pitch D-5>, ' +
+            '<music21.pitch.Pitch F-5>, <music21.pitch.Pitch A5>)')
 
 #    def xtestFirst(self):
 #         # associating a harmony with a scale
@@ -2088,7 +2203,7 @@ class Test(unittest.TestCase):
             targetCount,
             )
         for e in s2.flat.getElementsByClass('KeySignature'):
-            for site in e.sites.getSites():
+            for site in e.sites.get():
                 if site is not None:
                     site.remove(e)
         #s2.show()
@@ -2098,7 +2213,7 @@ class Test(unittest.TestCase):
             len(s3.flat.getElementsByClass('KeySignature')),
             targetCount,
             )
-        for e in s3._yieldElementsDownward(streamsOnly=True):
+        for e in s3.recurse(streamsOnly=True):
             if 'KeySignature' in e.classes:
                 # all active sites are None because of deep-copying
                 if e.activeSite is not None:
@@ -2110,26 +2225,13 @@ class Test(unittest.TestCase):
             len(s4.flat.getElementsByClass('KeySignature')),
             targetCount,
             )
-        for c in s4._yieldElementsDownward(streamsOnly=False):
+        # do not remove in iteration.
+        for c in list(s4.recurse(streamsOnly=False)):
             if 'Stream' in c.classes:
                 for e in c.getElementsByClass('KeySignature'):
                     c.remove(e)
 
-    def testYieldRemoveB(self):
-        from music21 import stream, note
-        m = stream.Measure()
-        m.append(key.KeySignature(4))
-        m.append(note.Note())
-        p = stream.Part()
-        p.append(m)
-        s = stream.Score()
-        s.append(p)
-        #s = corpus.parse('madrigal.3.1.rntxt')
-        for e in s._yieldElementsDownward(streamsOnly=False):
-            #environLocal.printDebug(['activeSite:', e, e.activeSite])
-            if 'KeySignature' in e.classes:
-                e.activeSite.remove(e)
-        self.assertEqual(len(s.flat.getElementsByClass('KeySignature')), 0)
+
 
     def testScaleDegreesA(self):
         from music21 import roman
@@ -2351,7 +2453,35 @@ class Test(unittest.TestCase):
         self.assertEqual(p(rn), 'F5 A5 B#5 D#6')
 
 
-class TestExternal(unittest.TestCase):
+    def testIII7(self):
+        c = chord.Chord(['E4', 'G4', 'B4', 'D5'])
+        k = key.Key('C')
+        rn = romanNumeralFromChord(c, k)
+        self.assertEqual(rn.figure, 'iii7')
+
+    def testHalfDimMinor(self):
+        c = chord.Chord(['A3', 'C4', 'E-4', 'G4'])
+        k = key.Key('c')
+        rn = romanNumeralFromChord(c, k)
+        self.assertEqual(rn.figure, 'vi/o7')
+
+    def testHalfDimIII(self):
+        c = chord.Chord(['F#3', 'A3', 'E4', 'C5'])
+        k = key.Key('d')
+        rn = romanNumeralFromChord(c, k)
+        self.assertEqual(rn.figure, '#iii/o7')
+
+    def testAugmentedOctave(self):
+        c = chord.Chord(['C4', 'E5', 'G5', 'C#6'])
+        k = key.Key('C')
+        f = postFigureFromChordAndKey(c, k)
+        self.assertEqual(f, '#853')
+
+        rn = romanNumeralFromChord(c, k)
+        self.assertEqual(rn.figure, 'I#853')
+
+
+class TestExternal(unittest.TestCase): # pragma: no cover
 
     def runTest(self):
         pass
@@ -2382,9 +2512,7 @@ class TestExternal(unittest.TestCase):
 
 if __name__ == "__main__":
     import music21
-    #import sys
-    #sys.argv.append('testAugmented')
-    music21.mainTest(Test)
+    music21.mainTest(Test) #, runTest='testAugmentedOctave')
 
 
 #------------------------------------------------------------------------------

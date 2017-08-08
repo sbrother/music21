@@ -7,7 +7,7 @@
 # Authors:      Michael Scott Cuthbert
 #               Christopher Ariza
 #
-# Copyright:    Copyright © 2009-2014 Michael Scott Cuthbert and the music21 Project
+# Copyright:    Copyright © 2009-2015 Michael Scott Cuthbert and the music21 Project
 # License:      LGPL or BSD, see license.txt
 #-------------------------------------------------------------------------------
 '''
@@ -45,6 +45,8 @@ import unittest
 import copy
 import os
 import re
+import sys
+import types
 import urllib
 import zipfile
 
@@ -64,9 +66,6 @@ _MOD = 'converter/__init__.py'
 environLocal = environment.Environment(_MOD)
 
 
-
-
-
 #-------------------------------------------------------------------------------
 class ArchiveManagerException(exceptions21.Music21Exception):
     pass
@@ -83,38 +82,40 @@ class ConverterFileException(exceptions21.Music21Exception):
 
 #-------------------------------------------------------------------------------
 class ArchiveManager(object):
-    r'''Before opening a file path, this class can check if this is an 
-    archived file collection, such as a .zip or or .mxl file. This will return the 
+    r'''
+    Before opening a file path, this class can check if this is an
+    archived file collection, such as a .zip or or .mxl file. This will return the
     data from the archive.
-    
-    >>> fnCorpus = corpus.getWork('opus18no1/movement3', fileExtensions=('.xml',))
-    
+
+    >>> fnCorpus = corpus.getWork('bwv66.6', fileExtensions=('.xml',))
+
     This is likely a unicode string
-    
+
     >>> #_DOCS_SHOW fnCorpus
-    >>> '/Users/cuthbert/Documents/music21/corpus/beethoven/opus18no1/movement3.mxl' #_DOCS_HIDE
-    '/Users/cuthbert/Documents/music21/corpus/beethoven/opus18no1/movement3.mxl'
+    >>> '/Users/cuthbert/git/music21base/music21/corpus/bach/bwv66.6.mxl' #_DOCS_HIDE
+    '/Users/cuthbert/git/music21base/music21/corpus/bach/bwv66.6.mxl'
     >>> am = converter.ArchiveManager(fnCorpus)
     >>> am.isArchive()
     True
     >>> am.getNames()
-    ['movement3.xml', 'META-INF/container.xml']
+    ['bwv66.6.xml', 'META-INF/container.xml']
     >>> data = am.getData()
     >>> data[0:70]
-    '<?xml version="1.0" standalone="no"?>\r\n<!DOCTYPE score-partwise PUBLIC'
+    '<?xml version="1.0" encoding="UTF-8"?>\r<!DOCTYPE score-partwise PUBLIC'
+
+
+    The only archive type supported now is zip. But .mxl is zip...
     '''
     # for info on mxl files, see
     # http://www.recordare.com/xml/compressed-mxl.html
 
     def __init__(self, fp, archiveType='zip'):
-        '''Only archive type supported now is zip. But .mxl is zip...
-        '''
-        self.fp = fp
+        self.fp = common.cleanpath(fp)
         self.archiveType = archiveType
 
     def isArchive(self):
         '''
-        Return True or False if the filepath is an 
+        Return True or False if the filepath is an
         archive of the supplied archiveType.
         '''
         if self.archiveType == 'zip':
@@ -134,7 +135,8 @@ class ArchiveManager(object):
 
 
     def getNames(self):
-        '''Return a list of all names contained in this archive.
+        '''
+        Return a list of all names contained in this archive.
         '''
         post = []
         if self.archiveType == 'zip':
@@ -145,63 +147,80 @@ class ArchiveManager(object):
         return post
 
 
-    def getData(self, name=None, dataFormat='musicxml' ):
-        '''Return data from the archive by name. If no name is given, 
+    def getData(self, name=None, dataFormat='musicxml'):
+        '''
+        Return data from the archive by name. If no name is given,
         a default may be available.
 
-        For 'musedata' format this will be a list of strings. 
+        For 'musedata' format this will be a list of strings.
         For 'musicxml' this will be a single string.
         '''
-        if self.archiveType == 'zip':
-            f = zipfile.ZipFile(self.fp, 'r')
-            if name == None and dataFormat == 'musicxml': # try to auto-harvest
-                # will return data as a string
-                # note that we need to read the META-INF/container.xml file
-                # and get the rootfile full-path
-                # a common presentation will be like this:
-                # ['musicXML.xml', 'META-INF/', 'META-INF/container.xml']
-                for subFp in f.namelist():
-                    # the name musicXML.xml is often used, or get top level
-                    # xml file
-                    if 'META-INF' in subFp:
-                        continue
-                    if subFp.endswith('.xml'):
-                        post = f.read(subFp)
-                        if six.PY3 and isinstance(post, bytes):
-                            try:
-                                post = post.decode(encoding='UTF-8')
-                            except UnicodeDecodeError: # sometimes windows written...
-                                post = post.decode(encoding='utf-16-le')
-                        break
-
-            elif name == None and dataFormat == 'musedata':
-                # this might concatenate all parts into a single string
-                # or, return a list of strings
-                # alternative, a different method might return one at a time
-                mdd = musedataModule.MuseDataDirectory(f.namelist())
-                #environLocal.printDebug(['mdd object, namelist', mdd, f.namelist])
-
-                post = []
-                for subFp in mdd.getPaths():
-                    component = f.open(subFp, 'rU')
-                    lines = component.readlines()
-                    #environLocal.printDebug(['subFp', subFp, len(lines)])
-                    if six.PY2:
-                        post.append(''.join(lines))
-                    else:
-                        post.append(''.join([l.decode(encoding='UTF-8') for l in lines]))
-
-                    # note: the following methods do not properly employ
-                    # universal new lines; this is a python problem:
-                    # http://bugs.python.org/issue6759
-                    #post.append(component.read())
-                    #post.append(f.read(subFp, 'U'))
-                    #msg.append('\n/END\n')
-
-
-            f.close()
-        else:
+        post = None
+        if self.archiveType != 'zip':
             raise ArchiveManagerException('no support for extension: %s' % self.archiveType)
+
+        f = zipfile.ZipFile(self.fp, 'r')
+        if name is None and dataFormat == 'musicxml': # try to auto-harvest
+            # will return data as a string
+            # note that we need to read the META-INF/container.xml file
+            # and get the rootfile full-path
+            # a common presentation will be like this:
+            # ['musicXML.xml', 'META-INF/', 'META-INF/container.xml']
+            for subFp in f.namelist():
+                # the name musicXML.xml is often used, or get top level
+                # xml file
+                if 'META-INF' in subFp:
+                    continue
+                if not subFp.endswith('.xml'):
+                    continue
+
+                post = f.read(subFp)
+                if six.PY3 and isinstance(post, bytes):
+                    foundEncoding = re.match(br"encoding=[\'\"](\S*?)[\'\"]", post[:1000])
+                    if foundEncoding:
+                        defaultEncoding = foundEncoding.group(1).decode('ascii')
+                        #print("FOUND ENCODING: ", defaultEncoding)
+                    else:
+                        defaultEncoding = 'UTF-8'
+                    try:
+                        post = post.decode(encoding=defaultEncoding)
+                    except UnicodeDecodeError: # sometimes windows written...
+                        post = post.decode(encoding='utf-16-le')
+                        post = re.sub(r"encoding=([\'\"]\S*?[\'\"])",
+                                      "encoding='UTF-8'", post)
+
+                break
+
+        elif name is None and dataFormat == 'musedata':
+            # this might concatenate all parts into a single string
+            # or, return a list of strings
+            # alternative, a different method might return one at a time
+            mdd = musedataModule.MuseDataDirectory(f.namelist())
+            #environLocal.printDebug(['mdd object, namelist', mdd, f.namelist])
+
+            post = []
+            for subFp in mdd.getPaths():
+                component = f.open(subFp, 'rU')
+                lines = component.readlines()
+                #environLocal.printDebug(['subFp', subFp, len(lines)])
+                if six.PY2:
+                    post.append(''.join(lines))
+                else:
+                    try:
+                        post.append(''.join([l.decode(encoding='UTF-8') for l in lines]))
+                    except UnicodeDecodeError:
+                        # python3 UTF-8 failed to read corpus/haydn/opus103/movement1.zip
+                        post.append(''.join([l.decode(encoding='ISO-8859-1') for l in lines]))
+
+                # note: the following methods do not properly employ
+                # universal new lines; this is a python problem:
+                # http://bugs.python.org/issue6759
+                #post.append(component.read())
+                #post.append(f.read(subFp, 'U'))
+                #msg.append('\n/END\n')
+
+
+        f.close()
 
 
         return post
@@ -212,25 +231,28 @@ class PickleFilter(object):
     '''
     Before opening a file path, this class checks to see if there is an up-to-date
     version of the file pickled and stored in the scratch directory.
-    
+
     If the user has not specified a scratch directory, or if forceSource is True
     then a pickle path will not be created.
+
+    Provide a file path to check if there is pickled version.
+
+    If forceSource is True, pickled files, if available, will not be
+    returned.
     '''
     def __init__(self, fp, forceSource=False, number=None):
-        '''Provide a file path to check if there is pickled version.
-
-        If forceSource is True, pickled files, if available, will not be
-        returned.
-        '''
-        self.fp = fp
+        self.fp = common.cleanpath(fp)
         self.forceSource = forceSource
         self.number = number
         #environLocal.printDebug(['creating pickle filter'])
 
-    def _getPickleFp(self, directory, zipType=None):
-        import sys
-        if directory == None:
-            raise ValueError
+    def getPickleFp(self, directory=None, zipType=None):
+        '''
+        Returns the file path of the pickle file for this file.
+        '''
+        if directory is None:
+            directory = environLocal.getRootTempDir()
+
         if zipType is None:
             extension = '.p'
         else:
@@ -241,24 +263,37 @@ class PickleFilter(object):
         if self.number is not None:
             baseName += '-' + str(self.number)
         baseName += extension
-        
+
         return os.path.join(directory, baseName)
+
+    def removePickle(self):
+        '''
+        If a compressed pickled file exists, remove it from disk.
+
+        Generally not necessary to call, since we can just overwrite obsolete pickles,
+        but useful elsewhere.
+        '''
+        pickleFp = self.getPickleFp(zipType='gz')
+        if os.path.exists(pickleFp):
+            os.remove(pickleFp)
+
 
     def status(self):
         '''
-        Given a file path specified with __init__, look for an up to date pickled 
-        version of this file path. If it exists, return its fp, otherwise return the 
+        Given a file path specified with __init__, look for an up to date pickled
+        version of this file path. If it exists, return its fp, otherwise return the
         original file path.
 
-        Return arguments are file path to load, boolean whether to write a pickle, and 
+        Return arguments are file path to load, boolean whether to write a pickle, and
         the file path of the pickle.
-        
+
         Does not check that fp exists or create the pickle file.
-        
+
         >>> fp = '/Users/Cuthbert/Desktop/musicFile.mxl'
         >>> pickfilt = converter.PickleFilter(fp)
         >>> #_DOCS_SHOW pickfilt.status()
-        ('/Users/Cuthbert/Desktop/musicFile.mxl', True, '/var/folders/x5/rymq2tx16lqbpytwb1n_cc4c0000gn/T/music21/m21-18b8c5a5f07826bd67ea0f20462f0b8d.pgz')
+        ('/Users/Cuthbert/Desktop/musicFile.mxl', True,
+              '/var/folders/music21/m21-18b8c5a5f07826bd67ea0f20462f0b8d.pgz')
 
         '''
         fpScratch = environLocal.getRootTempDir()
@@ -266,16 +301,17 @@ class PickleFilter(object):
 
         if m21Format == 'pickle': # do not pickle a pickle
             if self.forceSource:
-                raise PickleFilterException('cannot access source file when only given a file path to a pickled file.')
+                raise PickleFilterException(
+                        'cannot access source file when only given a file path to a pickled file.')
             writePickle = False # cannot write pickle if no scratch dir
             fpLoad = self.fp
             fpPickle = None
-        elif fpScratch == None or self.forceSource:
+        elif fpScratch is None or self.forceSource:
             writePickle = False # cannot write pickle if no scratch dir
             fpLoad = self.fp
             fpPickle = None
         else: # see which is more up to date
-            fpPickle = self._getPickleFp(fpScratch, zipType='gz')
+            fpPickle = self.getPickleFp(fpScratch, zipType='gz')
             if not os.path.exists(fpPickle):
                 writePickle = True # if pickled file does not exist
                 fpLoad = self.fp
@@ -294,32 +330,36 @@ class PickleFilter(object):
 _registeredSubconverters = []
 _deregisteredSubconverters = [] # default subconverters to skip
 
-def _resetSubconverters():
-    '''hidden method to reset state'''
-    global _registeredSubconverters
-    global _deregisteredSubconverters
+def resetSubconverters():
+    '''
+    Reset state to default (removing all registered and deregistered subconverters.
+    '''
+    global _registeredSubconverters # pylint: disable=global-statement
+    global _deregisteredSubconverters # pylint: disable=global-statement
     _registeredSubconverters = []
     _deregisteredSubconverters = []
 
 def registerSubconverter(newSubConverter):
     '''
     Add a Subconverter to the list of registered subconverters.
-    
+
     Example, register a converter for the obsolete Amiga composition software Sonix (so fun...)
-    
+
     >>> class ConverterSonix(converter.subConverters.SubConverter):
     ...    registerFormats = ('sonix',)
     ...    registerInputExtensions = ('mus',)
     >>> converter.registerSubconverter(ConverterSonix)
     >>> scf = converter.Converter().getSubConverterFormats()
-    >>> for x in sorted(list(scf.keys())):
-    ...     x, scf[x] 
+    >>> for x in sorted(scf):
+    ...     x, scf[x]
     ('abc', <class 'music21.converter.subConverters.ConverterABC'>)
     ...
-    ('sonix', <class 'music21.ConverterSonix'>)   
+    ('sonix', <class 'music21.ConverterSonix'>)
     ...
 
-    >>> converter._resetSubconverters() #_DOCS_HIDE
+    See `converter.qmConverter` for an example of an extended subconverter.
+
+    >>> converter.resetSubconverters() #_DOCS_HIDE
 
     '''
     _registeredSubconverters.append(newSubConverter)
@@ -327,8 +367,8 @@ def registerSubconverter(newSubConverter):
 def unregisterSubconverter(removeSubconverter):
     '''
     Remove a Subconverter from the list of registered subconverters.
-    
-    >>> converter._resetSubconverters() #_DOCS_HIDE    
+
+    >>> converter.resetSubconverters() #_DOCS_HIDE
     >>> mxlConverter = converter.subConverters.ConverterMusicXML
 
     >>> c = converter.Converter()
@@ -337,33 +377,34 @@ def unregisterSubconverter(removeSubconverter):
     >>> converter.unregisterSubconverter(mxlConverter)
     >>> mxlConverter in c.subconvertersList()
     False
-    
-    if there is no such subConverter registered and it is not a default subconverter, 
+
+    if there is no such subConverter registered and it is not a default subconverter,
     then a converter.ConverterException is raised:
-    
+
     >>> class ConverterSonix(converter.subConverters.SubConverter):
     ...    registerFormats = ('sonix',)
     ...    registerInputExtensions = ('mus',)
     >>> converter.unregisterSubconverter(ConverterSonix)
     Traceback (most recent call last):
-    ConverterException: Could not remove <class 'music21.ConverterSonix'> from registered subconverters
-    
+    music21.converter.ConverterException: Could not remove <class 'music21.ConverterSonix'> from
+                registered subconverters
+
     The special command "all" removes everything including the default converters:
 
     >>> converter.unregisterSubconverter('all')
     >>> c.subconvertersList()
     []
 
-    >>> converter._resetSubconverters() #_DOCS_HIDE
+    >>> converter.resetSubconverters() #_DOCS_HIDE
 
     '''
-    global _registeredSubconverters
-    global _deregisteredSubconverters
+    global _registeredSubconverters # pylint: disable=global-statement
+    global _deregisteredSubconverters # pylint: disable=global-statement
     if removeSubconverter == 'all':
         _registeredSubconverters = []
         _deregisteredSubconverters = ['all']
         return
-    
+
     try:
         _registeredSubconverters.remove(removeSubconverter)
     except ValueError:
@@ -371,8 +412,11 @@ def unregisterSubconverter(removeSubconverter):
         dsc = c.defaultSubconverters()
         if removeSubconverter in dsc:
             _deregisteredSubconverters.append(removeSubconverter)
-        else:       
-            raise ConverterException("Could not remove %r from registered subconverters" % removeSubconverter)
+        else:
+            raise ConverterException(
+                    "Could not remove %r from registered subconverters" % removeSubconverter)
+
+
 
 
 #-------------------------------------------------------------------------------
@@ -385,26 +429,30 @@ class Converter(object):
     Not a subclass, but a wrapper for different converter objects based on format.
     '''
     _DOC_ATTR = {'subConverter': 'a ConverterXXX object that will do the actual converting.',}
-    
+
     def __init__(self):
         self.subConverter = None
         self._thawedStream = None # a stream object unthawed
 
 
     def _getDownloadFp(self, directory, ext, url):
-        if directory == None:
+        if directory is None:
             raise ValueError
-        return os.path.join(directory, 'm21-' + _version.__version__ + '-' + common.getMd5(url) + ext)
+        return os.path.join(directory, 'm21-' + _version.__version__ + '-' +
+                                            common.getMd5(url) + ext)
 
-    def parseFileNoPickle(self, fp, number=None, format=None, forceSource=False): # @ReservedAssignment
+    # pylint: disable=redefined-builtin
+    def parseFileNoPickle(self, fp, number=None,
+                          format=None, forceSource=False, **keywords): # @ReservedAssignment
         '''
         Given a file path, parse and store a music21 Stream.
 
         If format is None then look up the format from the file
         extension using `common.findFormatFile`.
-        
+
         Does not use or store pickles in any circumstance.
         '''
+        fp = common.cleanpath(fp)
         #environLocal.printDebug(['attempting to parseFile', fp])
         if not os.path.exists(fp):
             raise ConverterFileException('no such file exists: %s' % fp)
@@ -414,21 +462,27 @@ class Converter(object):
             useFormat = self.getFormatFromFileExtension(fp)
 
         self.setSubconverterFromFormat(useFormat)
-        self.subConverter.parseFile(fp, number=number)
+        self.subConverter.keywords = keywords
+        try:
+            self.subConverter.parseFile(fp, number=number, **keywords)
+        except NotImplementedError:
+            raise ConverterFileException('File is not in a correct format: %s' % fp)
+
         self.stream.filePath = fp
         self.stream.fileNumber = number
         self.stream.fileFormat = useFormat
-    
+
     def getFormatFromFileExtension(self, fp):
         '''
         gets the format from a file extension.
-        
+
         >>> import os
         >>> fp = os.path.join(common.getSourceFilePath(), 'musedata', 'testZip.zip')
         >>> c = converter.Converter()
         >>> c.getFormatFromFileExtension(fp)
         'musedata'
         '''
+        fp = common.cleanpath(fp)
         # if the file path is to a directory, assume it is a collection of
         # musedata parts
         useFormat = None
@@ -439,20 +493,23 @@ class Converter(object):
             if useFormat is None:
                 raise ConverterFileException('cannot find a format extensions for: %s' % fp)
         return useFormat
-    
-    def parseFile(self, fp, number=None, format=None, forceSource=False, storePickle=True): # @ReservedAssignment
+
+    def parseFile(self, fp, number=None,
+            format=None, forceSource=False, storePickle=True, **keywords): # @ReservedAssignment
         '''
         Given a file path, parse and store a music21 Stream.
 
         If format is None then look up the format from the file
         extension using `common.findFormatFile`.
-        
+
         Will load from a pickle unless forceSource is True
         Will store as a pickle unless storePickle is False
         '''
         from music21 import freezeThaw
+        fp = common.cleanpath(fp)
+
         if not os.path.exists(fp):
-            raise ConverterFileException('no such file eists: %s' % fp)
+            raise ConverterFileException('no such file exists: %s' % fp)
         useFormat = format
 
         if useFormat is None:
@@ -463,24 +520,24 @@ class Converter(object):
             environLocal.printDebug("Loading Pickled version")
             try:
                 self._thawedStream = thaw(fpPickle, zipType='zlib')
-            except:
+            except freezeThaw.FreezeThawException:
                 environLocal.warn("Could not parse pickle, %s ...rewriting" % fpPickle)
                 os.remove(fpPickle)
-                self.parseFileNoPickle(fp, number, format, forceSource)
+                self.parseFileNoPickle(fp, number, format, forceSource, **keywords)
 
             self.stream.filePath = fp
             self.stream.fileNumber = number
             self.stream.fileFormat = useFormat
         else:
             environLocal.printDebug("Loading original version")
-            self.parseFileNoPickle(fp, number, format, forceSource)
+            self.parseFileNoPickle(fp, number, format, forceSource, **keywords)
             if writePickle is True and fpPickle is not None and storePickle is True:
                 # save the stream to disk...
                 environLocal.printDebug("Freezing Pickle")
                 s = self.stream
                 sf = freezeThaw.StreamFreezer(s, fastButUnsafe=True)
                 sf.write(fp=fpPickle, zipType='zlib')
-                
+
                 environLocal.printDebug("Replacing self.stream")
                 # get a new stream
                 self._thawedStream = thaw(fpPickle, zipType='zlib')
@@ -488,9 +545,10 @@ class Converter(object):
                 self.stream.fileNumber = number
                 self.stream.fileFormat = useFormat
 
-            
 
-    def parseData(self, dataStr, number=None, format=None, forceSource=False): # @ReservedAssignment
+
+    def parseData(self, dataStr, number=None,
+                  format=None, forceSource=False, **keywords): # @ReservedAssignment
         '''
         Given raw data, determine format and parse into a music21 Stream.
         '''
@@ -501,17 +559,28 @@ class Converter(object):
             useFormat, dataStr = self.formatFromHeader(dataStr)
 
             if six.PY3 and isinstance(dataStr, bytes):
-                dataStrMakeStr = dataStr.decode('utf-8','ignore')
+                dataStrMakeStr = dataStr.decode('utf-8', 'ignore')
             else:
                 dataStrMakeStr = dataStr
 
             if useFormat is not None:
                 pass
-            elif dataStrMakeStr.startswith('<?xml') or dataStrMakeStr.lower().startswith('musicxml:'):
+            elif dataStrMakeStr.startswith('<?xml'):
+                # is it MEI or MusicXML?
+                if '<mei' in dataStrMakeStr:
+                    useFormat = 'mei'
+                else:
+                    useFormat = 'musicxml'
+            elif dataStrMakeStr.startswith('mei:') or dataStrMakeStr.lower().startswith('mei:'):
+                useFormat = 'mei'
+            elif (dataStrMakeStr.startswith('musicxml:') or
+                    dataStrMakeStr.lower().startswith('musicxml:')):
                 useFormat = 'musicxml'
             elif dataStrMakeStr.startswith('MThd') or dataStrMakeStr.lower().startswith('midi:'):
                 useFormat = 'midi'
-            elif dataStrMakeStr.startswith('!!!') or dataStrMakeStr.startswith('**') or dataStrMakeStr.lower().startswith('humdrum:'):
+            elif (dataStrMakeStr.startswith('!!!') or
+                    dataStrMakeStr.startswith('**') or
+                    dataStrMakeStr.lower().startswith('humdrum:')):
                 useFormat = 'humdrum'
             elif dataStrMakeStr.lower().startswith('tinynotation:'):
                 useFormat = 'tinyNotation'
@@ -524,13 +593,15 @@ class Converter(object):
             elif 'Time Signature:' in dataStrMakeStr and 'm1' in dataStrMakeStr:
                 useFormat = 'romanText'
             else:
-                raise ConverterException('File not found or no such format found for: %s' % dataStrMakeStr)
+                raise ConverterException('File not found or no such format found for: %s' %
+                                         dataStrMakeStr)
 
         self.setSubconverterFromFormat(useFormat)
+        self.subConverter.keywords = keywords
         self.subConverter.parseData(dataStr, number=number)
 
 
-    def parseURL(self, url, format=None, number=None): # @ReservedAssignment
+    def parseURL(self, url, format=None, number=None, **keywords): # @ReservedAssignment
         '''Given a url, download and parse the file
         into a music21 Stream stored in the `stream`
         property of the converter object.
@@ -538,9 +609,8 @@ class Converter(object):
         Note that this checks the user Environment
         `autoDownlaad` setting before downloading.
 
-        TODO: replace with free version of jeanieLightBrownHair
-
-        >>> #_DOCS_SHOW jeanieLightBrownURL = 'http://www.wikifonia.org/node/4391'
+        >>> jeanieLightBrownURL = ('https://github.com/cuthbertLab/music21/raw/master' +
+        ...        '/music21/corpus/leadSheet/fosterBrownHair.mxl')
         >>> c = converter.Converter()
         >>> #_DOCS_SHOW c.parseURL(jeanieLightBrownURL)
         >>> #_DOCS_SHOW jeanieStream = c.stream
@@ -553,12 +623,6 @@ class Converter(object):
             message += "environment.set('autoDownload', 'allow')"
             message = message.format(autoDownload)
             raise ConverterException(message)
-
-        # If we give the URL to a Wikifonia main page,
-        # redirect to musicxml page:
-        matchedWikifonia = re.search("wikifonia.org/node/(\d+)", url)
-        if matchedWikifonia:
-            url = 'http://static.wikifonia.org/' + matchedWikifonia.group(1) + '/musicxml.xml'
 
         # this format check is here first to see if we can find the format
         # in the url; if forcing a format we do not need this
@@ -574,12 +638,12 @@ class Converter(object):
 
         directory = environLocal.getRootTempDir()
         dst = self._getDownloadFp(directory, ext, url)
-        if (hasattr(urllib, 'urlretrieve')): 
+        if (hasattr(urllib, 'urlretrieve')):
             # python 2
             urlretrieve = urllib.urlretrieve
         else: #python3
             urlretrieve = urllib.request.urlretrieve # @UndefinedVariable
-        
+
         if not os.path.exists(dst):
             try:
                 environLocal.printDebug(['downloading to:', dst])
@@ -596,6 +660,7 @@ class Converter(object):
         else:
             useFormat = format
         self.setSubconverterFromFormat(useFormat)
+        self.subConverter.keywords = keywords
         self.subConverter.parseFile(fp, number=number)
         self.stream.filePath = fp
         self.stream.fileNumber = number
@@ -603,15 +668,51 @@ class Converter(object):
 
     #------------------------------------------------------------------------#
     # Subconverters
-    def subconvertersList(self):
+    def subconvertersList(self, converterType='any'):
         '''
-        >>> converter._resetSubconverters() #_DOCS_HIDE
+        Gives a list of all the subconverters that are registered.
+
+        If converterType is 'any' (true), then input or output
+        subconverters are listed.
+
+        Otherwise, 'input', or 'output' can be used to filter.
+
+        >>> converter.resetSubconverters() #_DOCS_HIDE
         >>> c = converter.Converter()
         >>> scl = c.subconvertersList()
         >>> defaultScl = c.defaultSubconverters()
         >>> tuple(scl) == tuple(defaultScl)
         True
-        
+
+        >>> sclInput = c.subconvertersList('input')
+        >>> sclInput
+        [<class 'music21.converter.subConverters.ConverterABC'>,
+         <class 'music21.converter.subConverters.ConverterCapella'>,
+         <class 'music21.converter.subConverters.ConverterClercqTemperley'>,
+         <class 'music21.converter.subConverters.ConverterHumdrum'>,
+         <class 'music21.converter.subConverters.ConverterMEI'>,
+         <class 'music21.converter.subConverters.ConverterMidi'>,
+         <class 'music21.converter.subConverters.ConverterMuseData'>,
+         <class 'music21.converter.subConverters.ConverterMusicXML'>,
+         <class 'music21.converter.subConverters.ConverterNoteworthy'>,
+         <class 'music21.converter.subConverters.ConverterNoteworthyBinary'>,
+         <class 'music21.converter.subConverters.ConverterRomanText'>,
+         <class 'music21.converter.subConverters.ConverterScala'>,
+         <class 'music21.converter.subConverters.ConverterTinyNotation'>]
+
+        >>> sclOutput = c.subconvertersList('output')
+        >>> sclOutput
+        [<class 'music21.converter.subConverters.ConverterBraille'>,
+         <class 'music21.converter.subConverters.ConverterLilypond'>,
+         <class 'music21.converter.subConverters.ConverterMidi'>,
+         <class 'music21.converter.subConverters.ConverterMusicXML'>,
+         <class 'music21.converter.subConverters.ConverterScala'>,
+         <class 'music21.converter.subConverters.ConverterText'>,
+         <class 'music21.converter.subConverters.ConverterTextLine'>,
+         <class 'music21.converter.subConverters.ConverterVexflow'>]
+
+
+
         >>> class ConverterSonix(converter.subConverters.SubConverter):
         ...    registerFormats = ('sonix',)
         ...    registerInputExtensions = ('mus',)
@@ -619,42 +720,54 @@ class Converter(object):
         >>> ConverterSonix in c.subconvertersList()
         True
 
-        >>> converter._resetSubconverters() #_DOCS_HIDE
+        >>> converter.resetSubconverters() #_DOCS_HIDE
         '''
-        subConverters = []
-        if len(_registeredSubconverters) > 0:
-            for reg in _registeredSubconverters:
-                #print reg
-                subConverters.append(reg)
+        subConverterList = []
+        for reg in _registeredSubconverters:
+            #print reg
+            subConverterList.append(reg)
 
-        if len(_deregisteredSubconverters) > 0 and _deregisteredSubconverters[0] == 'all':
+        if _deregisteredSubconverters and _deregisteredSubconverters[0] == 'all':
             pass
         else:
-            subConverters.extend(self.defaultSubconverters())
-            if len(_deregisteredSubconverters) > 0:
-                for unreg in _deregisteredSubconverters:
-                    try:
-                        subConverters.remove(unreg)
-                    except ValueError:
-                        pass
-        return subConverters
+            subConverterList.extend(self.defaultSubconverters())
+            for unreg in _deregisteredSubconverters:
+                try:
+                    subConverterList.remove(unreg)
+                except ValueError:
+                    pass
+
+        if converterType == 'any':
+            return subConverterList
+
+        filteredSubConvertersList = []
+        for sc in subConverterList:
+            if converterType == 'input' and not sc.registerInputExtensions:
+                continue
+            if converterType == 'output' and not sc.registerOutputExtensions:
+                continue
+            filteredSubConvertersList.append(sc)
+
+        return filteredSubConvertersList
 
     def defaultSubconverters(self):
         '''
         return an alphabetical list of the default subconverters: those in converter.subConverters
         with the class Subconverter.
-        
+
         Do not use generally.  use c.subConvertersList()
-        
+
         >>> c = converter.Converter()
         >>> for sc in c.defaultSubconverters():
         ...     print(sc)
         <class 'music21.converter.subConverters.ConverterABC'>
         <class 'music21.converter.subConverters.ConverterBraille'>
         <class 'music21.converter.subConverters.ConverterCapella'>
+        <class 'music21.converter.subConverters.ConverterClercqTemperley'>
         <class 'music21.converter.subConverters.ConverterHumdrum'>
         <class 'music21.converter.subConverters.ConverterIPython'>
         <class 'music21.converter.subConverters.ConverterLilypond'>
+        <class 'music21.converter.subConverters.ConverterMEI'>
         <class 'music21.converter.subConverters.ConverterMidi'>
         <class 'music21.converter.subConverters.ConverterMuseData'>
         <class 'music21.converter.subConverters.ConverterMusicXML'>
@@ -666,32 +779,36 @@ class Converter(object):
         <class 'music21.converter.subConverters.ConverterTextLine'>
         <class 'music21.converter.subConverters.ConverterTinyNotation'>
         <class 'music21.converter.subConverters.ConverterVexflow'>
-        <class 'music21.converter.subConverters.SubConverter'>        
+        <class 'music21.converter.subConverters.SubConverter'>
         '''
-        import types
         defaultSubconverters = []
-        for i in sorted(list(subConverters.__dict__.keys())):
+        for i in sorted(subConverters.__dict__):
             name = getattr(subConverters, i)
-            if callable(name) and not isinstance(name, types.FunctionType) and subConverters.SubConverter in name.__mro__:
+            if (callable(name)
+                    and not isinstance(name, types.FunctionType)
+                    and subConverters.SubConverter in name.__mro__):
                 defaultSubconverters.append(name)
         return defaultSubconverters
 
     def getSubConverterFormats(self):
         '''
         Get a dictionary of subConverters for various formats.
-        
+
         >>> scf = converter.Converter().getSubConverterFormats()
         >>> scf['abc']
         <class 'music21.converter.subConverters.ConverterABC'>
-        >>> for x in sorted(list(scf.keys())):
+        >>> for x in sorted(scf):
         ...     x, scf[x]
         ('abc', <class 'music21.converter.subConverters.ConverterABC'>)
         ('braille', <class 'music21.converter.subConverters.ConverterBraille'>)
         ('capella', <class 'music21.converter.subConverters.ConverterCapella'>)
+        ('cttxt', <class 'music21.converter.subConverters.ConverterClercqTemperley'>)
+        ('har', <class 'music21.converter.subConverters.ConverterClercqTemperley'>)
         ('humdrum', <class 'music21.converter.subConverters.ConverterHumdrum'>)
         ('ipython', <class 'music21.converter.subConverters.ConverterIPython'>)
         ('lily', <class 'music21.converter.subConverters.ConverterLilypond'>)
         ('lilypond', <class 'music21.converter.subConverters.ConverterLilypond'>)
+        ('mei', <class 'music21.converter.subConverters.ConverterMEI'>)
         ('midi', <class 'music21.converter.subConverters.ConverterMidi'>)
         ('musedata', <class 'music21.converter.subConverters.ConverterMuseData'>)
         ('musicxml', <class 'music21.converter.subConverters.ConverterMusicXML'>)
@@ -706,7 +823,7 @@ class Converter(object):
         ('tinynotation', <class 'music21.converter.subConverters.ConverterTinyNotation'>)
         ('txt', <class 'music21.converter.subConverters.ConverterText'>)
         ('vexflow', <class 'music21.converter.subConverters.ConverterVexflow'>)
-        ('xml', <class 'music21.converter.subConverters.ConverterMusicXML'>)       
+        ('xml', <class 'music21.converter.subConverters.ConverterMusicXML'>)
         '''
         converterFormats = {}
         for name in self.subconvertersList():
@@ -716,11 +833,11 @@ class Converter(object):
                     converterFormats[f.lower()] = name
         return converterFormats
 
-    def setSubconverterFromFormat(self, converterFormat): 
+    def setSubconverterFromFormat(self, converterFormat):
         '''
         sets the .subConverter according to the format of `converterFormat`:
-        
-        >>> convObj = converter.Converter()       
+
+        >>> convObj = converter.Converter()
         >>> convObj.setSubconverterFromFormat('humdrum')
         >>> convObj.subConverter
         <music21.converter.subConverters.ConverterHumdrum object at 0x...>
@@ -729,7 +846,7 @@ class Converter(object):
             raise ConverterException('Did not find a format from the source file')
         converterFormat = converterFormat.lower()
         scf = self.getSubConverterFormats()
-        if converterFormat not in scf: 
+        if converterFormat not in scf:
             raise ConverterException('no converter available for format: %s' % converterFormat)
         subConverterClass = scf[converterFormat]
         self.subConverter = subConverterClass()
@@ -762,11 +879,11 @@ class Converter(object):
         >>> converter.registerSubconverter(ConverterSonix)
         >>> c.formatFromHeader('sonix: AIFF data')
         ('sonix', 'AIFF data')
-        >>> converter._resetSubconverters() #_DOCS_HIDE    
+        >>> converter.resetSubconverters() #_DOCS_HIDE
         '''
         dataStrStartLower = dataStr[:20].lower()
         if six.PY3 and isinstance(dataStrStartLower, bytes):
-            dataStrStartLower = dataStrStartLower.decode('utf-8','ignore')
+            dataStrStartLower = dataStrStartLower.decode('utf-8', 'ignore')
 
         foundFormat = None
         sclist = self.subconvertersList()
@@ -783,12 +900,12 @@ class Converter(object):
         '''
         Take in a string representing a format, a file extension (w/ or without leading dot)
         etc. and find the format string that best represents the format that should be used.
-        
+
         Searches SubConverter.registerFormats first, then SubConverter.registerInputExtensions,
         then SubConverter.registerOutputExtensions
-        
+
         Returns None if no format applies:
-        
+
         >>> c = converter.Converter()
         >>> c.regularizeFormat('mxl')
         'musicxml'
@@ -799,15 +916,14 @@ class Converter(object):
         >>> c.regularizeFormat('lily.png')
         'lilypond'
         >>> c.regularizeFormat('blah') is None
-        True              
-        
+        True
         '''
         # make lower case, as some lilypond processing used upper case
         fmt = fmt.lower().strip()
         if fmt.startswith('.'):
             fmt = fmt[1:] # strip .
         foundSc = None
-        
+
         formatList = fmt.split('.')
         fmt = formatList[0]
         if len(formatList) > 1:
@@ -815,9 +931,9 @@ class Converter(object):
         else:
             unused_subformats = []
         scl = self.subconvertersList()
-        
+
         for sc in scl:
-            formats = sc.registerFormats        
+            formats = sc.registerFormats
             for scFormat in formats:
                 if fmt == scFormat:
                     foundSc = sc
@@ -844,16 +960,16 @@ class Converter(object):
                 if foundSc is not None:
                     break
 
-        if len(sc.registerFormats) > 0:
-            return sc.registerFormats[0]
+        if foundSc and foundSc.registerFormats:
+            return foundSc.registerFormats[0]
         else:
             return None
 
 
     #---------------------------------------------------------------------------
     # properties
-
-    def _getStream(self):
+    @property
+    def stream(self):
         '''
         Returns the .subConverter.stream object.
         '''
@@ -866,40 +982,41 @@ class Converter(object):
         # not _stream: please don't look in other objects' private variables;
         #              humdrum worked differently.
 
-    stream = property(_getStream)
-
 
 
 
 #-------------------------------------------------------------------------------
 # module level convenience methods
 
-
-def parseFile(fp, number=None, format=None, forceSource=False):  #@ReservedAssignment
+# pylint: disable=redefined-builtin
+def parseFile(fp, number=None, format=None, forceSource=False, **keywords):  #@ReservedAssignment
     '''
     Given a file path, attempt to parse the file into a Stream.
     '''
     v = Converter()
-    v.parseFile(fp, number=number, format=format, forceSource=forceSource)
+    fp = common.cleanpath(fp)
+    v.parseFile(fp, number=number, format=format, forceSource=forceSource, **keywords)
     return v.stream
 
-def parseData(dataStr, number=None, format=None): # @ReservedAssignment
+# pylint: disable=redefined-builtin
+def parseData(dataStr, number=None, format=None, **keywords): # @ReservedAssignment
     '''
     Given musical data represented within a Python string, attempt to parse the
     data into a Stream.
     '''
     v = Converter()
-    v.parseData(dataStr, number=number, format=format)
+    v.parseData(dataStr, number=number, format=format, **keywords)
     return v.stream
 
-def parseURL(url, number=None, format=None, forceSource=False): # @ReservedAssignment
+# pylint: disable=redefined-builtin
+def parseURL(url, number=None, format=None, forceSource=False, **keywords): # @ReservedAssignment
     '''
     Given a URL, attempt to download and parse the file into a Stream. Note:
     URL downloading will not happen automatically unless the user has set their
     Environment "autoDownload" preference to "allow".
     '''
     v = Converter()
-    v.parseURL(url, format=format)
+    v.parseURL(url, format=format, **keywords)
     return v.stream
 
 def parse(value, *args, **keywords):
@@ -919,27 +1036,27 @@ def parse(value, *args, **keywords):
     processed as data.
 
     PC File:
-    
-    >>> #_DOCS_SHOW s = converter.parse(r'c:\users\myke\desktop\myfile.xml') 
-    
+
+    >>> #_DOCS_SHOW s = converter.parse(r'c:\users\myke\desktop\myfile.xml')
+
     Mac File:
-    
-    >>> #_DOCS_SHOW s = converter.parse('/Users/cuthbert/Desktop/myfile.xml') 
+
+    >>> #_DOCS_SHOW s = converter.parse('/Users/cuthbert/Desktop/myfile.xml')
 
     URL:
-    
-    >>> #_DOCS_SHOW s = converter.parse('http://midirepository.org/file220/file.mid') 
+
+    >>> #_DOCS_SHOW s = converter.parse('http://midirepository.org/file220/file.mid')
 
 
     Data is preceded by an identifier such as "tinynotation:"
 
-    >>> s = converter.parse("tinyNotation: 3/4 E4 r f# g=lastG trip{b-8 a g} c")
+    >>> s = converter.parse("tinyNotation: 3/4 E4 r f# g=lastG trip{b-8 a g} c", makeNotation=False)
     >>> s.getElementsByClass(meter.TimeSignature)[0]
     <music21.meter.TimeSignature 3/4>
 
     or the format can be passed directly:
 
-    >>> s = converter.parse("2/16 E4 r f# g=lastG trip{b-8 a g} c", format='tinyNotation')
+    >>> s = converter.parse("2/16 E4 r f# g=lastG trip{b-8 a g} c", format='tinyNotation').flat
     >>> s.getElementsByClass(meter.TimeSignature)[0]
     <music21.meter.TimeSignature 2/16>
     '''
@@ -947,17 +1064,20 @@ def parse(value, *args, **keywords):
     #environLocal.printDebug(['attempting to parse()', value])
     if 'forceSource' in keywords:
         forceSource = keywords['forceSource']
+        del(keywords['forceSource'])
     else:
         forceSource = False
 
     # see if a work number is defined; for multi-work collections
     if 'number' in keywords:
         number = keywords['number']
+        del(keywords['number'])
     else:
         number = None
 
     if 'format' in keywords:
         m21Format = keywords['format']
+        del(keywords['format'])
     else:
         m21Format = None
 
@@ -966,28 +1086,38 @@ def parse(value, *args, **keywords):
     else:
         valueStr = value
 
-    if (common.isListLike(value) and len(value) == 2 and
-        value[1] == None and os.path.exists(value[0])):
+    if (common.isListLike(value)
+            and len(value) == 2
+            and value[1] is None
+            and os.path.exists(value[0])):
         # comes from corpus.search
-        return parseFile(value[0], format=m21Format)
-    elif (common.isListLike(value) and len(value) == 2 and
-        isinstance(value[1], int) and os.path.exists(value[0])):
+        return parseFile(value[0], format=m21Format, **keywords)
+    elif (common.isListLike(value)
+          and len(value) == 2
+          and isinstance(value[1], int)
+          and os.path.exists(value[0])):
         # corpus or other file with movement number
-        return parseFile(value[0], format=m21Format).getScoreByNumber(value[1])
-    elif common.isListLike(value) or len(args) > 0: # tiny notation list
-        if len(args) > 0: # add additional args to a list
+        return parseFile(value[0], format=m21Format, **keywords).getScoreByNumber(value[1])
+    elif common.isListLike(value) or args: # tiny notation list # TODO: Remove.
+        if args: # add additional args to a list
             value = [value] + list(args)
-        return parseData(value, number=number)
+        return parseData(value, number=number, **keywords)
     # a midi string, must come before os.path.exists test
     elif valueStr.startswith('MThd'):
-        return parseData(value, number=number, format=m21Format)
+        return parseData(value, number=number, format=m21Format, **keywords)
     elif os.path.exists(value):
-        return parseFile(value, number=number, format=m21Format, forceSource=forceSource)
+        return parseFile(value, number=number, format=m21Format,
+                         forceSource=forceSource, **keywords)
+    elif os.path.exists(common.cleanpath(value)):
+        return parseFile(common.cleanpath(value), number=number, format=m21Format,
+                         forceSource=forceSource, **keywords)
+
     elif (valueStr.startswith('http://') or valueStr.startswith('https://')):
         # its a url; may need to broaden these criteria
-        return parseURL(value, number=number, format=m21Format, forceSource=forceSource)
+        return parseURL(value, number=number, format=m21Format,
+                        forceSource=forceSource, **keywords)
     else:
-        return parseData(value, number=number, format=m21Format)
+        return parseData(value, number=number, format=m21Format, **keywords)
 
 
 
@@ -1006,24 +1136,31 @@ def freeze(streamObj, fmt=None, fp=None, fastButUnsafe=False, zipType='zlib'):
 
     >>> c = converter.parse('tinynotation: 4/4 c4 d e f')
     >>> c.show('text')
-    {0.0} <music21.meter.TimeSignature 4/4>
-    {0.0} <music21.note.Note C>
-    {1.0} <music21.note.Note D>
-    {2.0} <music21.note.Note E>
-    {3.0} <music21.note.Note F>
+    {0.0} <music21.stream.Measure 1 offset=0.0>
+        {0.0} <music21.clef.TrebleClef>
+        {0.0} <music21.meter.TimeSignature 4/4>
+        {0.0} <music21.note.Note C>
+        {1.0} <music21.note.Note D>
+        {2.0} <music21.note.Note E>
+        {3.0} <music21.note.Note F>
+        {4.0} <music21.bar.Barline style=final>
     >>> fp = converter.freeze(c, fmt='pickle')
     >>> #_DOCS_SHOW fp
     '/tmp/music21/sjiwoe.pgz'
 
-    The file can then be "thawed" back into a Stream using the :func:`~music21.converter.thaw` method.
+    The file can then be "thawed" back into a Stream using the
+    :func:`~music21.converter.thaw` method.
 
     >>> d = converter.thaw(fp)
     >>> d.show('text')
-    {0.0} <music21.meter.TimeSignature 4/4>
-    {0.0} <music21.note.Note C>
-    {1.0} <music21.note.Note D>
-    {2.0} <music21.note.Note E>
-    {3.0} <music21.note.Note F>
+    {0.0} <music21.stream.Measure 1 offset=0.0>
+        {0.0} <music21.clef.TrebleClef>
+        {0.0} <music21.meter.TimeSignature 4/4>
+        {0.0} <music21.note.Note C>
+        {1.0} <music21.note.Note D>
+        {2.0} <music21.note.Note E>
+        {3.0} <music21.note.Note F>
+        {4.0} <music21.bar.Barline style=final>
     '''
     from music21 import freezeThaw
     v = freezeThaw.StreamFreezer(streamObj, fastButUnsafe=fastButUnsafe)
@@ -1056,7 +1193,7 @@ def freezeStr(streamObj, fmt=None):
     is the only one presently supported.
 
 
-    >>> c = converter.parse('tinyNotation: 4/4 c4 d e f')
+    >>> c = converter.parse('tinyNotation: 4/4 c4 d e f', makeNotation=False)
     >>> c.show('text')
     {0.0} <music21.meter.TimeSignature 4/4>
     {0.0} <music21.note.Note C>
@@ -1094,7 +1231,7 @@ def thawStr(strData):
 
 
 #-------------------------------------------------------------------------------
-class TestExternal(unittest.TestCase):
+class TestExternal(unittest.TestCase): # pragma: no cover
     # interpreter loading
 
     def runTest(self):
@@ -1108,7 +1245,7 @@ class TestExternal(unittest.TestCase):
 
     def testMusicXMLTabConversion(self):
         from music21.musicxml import testFiles
-        
+
         mxString = testFiles.ALL[5] # @UndefinedVariable
         a = subConverters.ConverterMusicXML()
         a.parseData(mxString)
@@ -1120,16 +1257,16 @@ class TestExternal(unittest.TestCase):
         #{0.0} <music21.stream.Part Electric Guitar>
         #    {0.0} <music21.instrument.Instrument P0: Electric Guitar: >
         #    {0.0} <music21.stream.Measure 0 offset=0.0>
-        #        {0.0} <music21.layout.StaffLayout distance None, staffNumber None, staffSize None, staffLines 6>
+        #        {0.0} <music21.layout.StaffLayout distance None, ...staffLines 6>
         #        {0.0} <music21.clef.TabClef>
         #        {0.0} <music21.tempo.MetronomeMark animato Quarter=120.0>
         #        {0.0} <music21.key.KeySignature of no sharps or flats, mode major>
         #        {0.0} <music21.meter.TimeSignature 4/4>
         #        {0.0} <music21.note.Note F>
         #        {2.0} <music21.note.Note F#>
-        
+
         b.show()
-        pass        
+        pass
 
 
     def testConversionMusicXml(self):
@@ -1150,8 +1287,9 @@ class TestExternal(unittest.TestCase):
 
 
     def testParseURL(self):
-        urlB = 'http://kern.ccarh.org/cgi-bin/ksdata?l=users/craig/classical/schubert/piano/d0576&file=d0576-06.krn&f=kern'
-        urlC = 'http://kern.ccarh.org/cgi-bin/ksdata?l=users/craig/classical/bach/cello&file=bwv1007-01.krn&f=xml'
+        urlBase = 'http://kern.ccarh.org/cgi-bin/ksdata?l=users/craig/classical/'
+        urlB = urlBase + 'schubert/piano/d0576&file=d0576-06.krn&f=kern'
+        urlC = urlBase + 'bach/cello&file=bwv1007-01.krn&f=xml'
         for url in [urlB, urlC]:
             try:
                 unused_post = parseURL(url)
@@ -1175,7 +1313,6 @@ class Test(unittest.TestCase):
     def testCopyAndDeepcopy(self):
         '''Test copying all objects defined in this module
         '''
-        import sys, types
         for part in sys.modules[self.__module__].__dict__:
             match = False
             for skip in ['_', '__', 'Test', 'Exception']:
@@ -1359,29 +1496,6 @@ class Test(unittest.TestCase):
         self.assertEqual(len(ts), 4)
 
 
-        a = corpus.parse('mozart/k156/movement4')
-
-        # violin part
-        clefs = a.parts[0].flat.getElementsByClass(clef.Clef)
-        self.assertEqual(len(clefs), 1)
-        self.assertEqual(clefs[0].sign, 'G')
-
-        # viola
-        clefs = a.parts[2].flat.getElementsByClass(clef.Clef)
-        self.assertEqual(len(clefs), 1)
-        self.assertEqual(clefs[0].sign, 'C')
-
-        # violoncello
-        clefs = a.parts[3].flat.getElementsByClass(clef.Clef)
-        self.assertEqual(len(clefs), 1)
-        self.assertEqual(clefs[0].sign, 'F')
-
-        # check time signatures
-        # there are
-        ts = a.parts[0].flat.getElementsByClass(meter.TimeSignature)
-        self.assertEqual(len(ts), 1)
-
-
     def testConversionMXArticulations(self):
         from music21 import note
         from music21.musicxml import testPrimitive
@@ -1463,7 +1577,7 @@ class Test(unittest.TestCase):
         countTies = 0
         countStartTies = 0
         for p in a.parts:
-            post = p.getContextByClass('Clef')
+            post = p.recurse().notes[0].getContextByClass('Clef')
             self.assertEqual(isinstance(post, clef.TenorClef), True)
             for n in p.flat.notes:
                 if n.tie != None:
@@ -1477,26 +1591,29 @@ class Test(unittest.TestCase):
 
     def testConversionMXInstrument(self):
         from music21 import corpus
-        s = corpus.parse('beethoven/opus18no1/movement3.xml')
+        s = corpus.parse('schumann_clara/opus17', 3)
         #s.show()
         is1 = s.parts[0].flat.getElementsByClass('Instrument')
         self.assertEqual(len(is1), 1)
+        #self.assertIn('Violin', is1[0].classes)
         is2 = s.parts[1].flat.getElementsByClass('Instrument')
         self.assertEqual(len(is2), 1)
-
+        #self.assertIn('Violoncello', is1[0].classes)
         is3 = s.parts[2].flat.getElementsByClass('Instrument')
         self.assertEqual(len(is3), 1)
-
-        is4 = s.parts[3].flat.getElementsByClass('Instrument')
-        self.assertEqual(len(is4), 1)
-
+        #self.assertIn('Piano', is1[0].classes)
 
 
     def testConversionMidiBasic(self):
         directory = common.getPackageDir(relative=False, remapSep=os.sep)
+        fp = None
         for fp in directory:
             if fp.endswith('midi'):
                 break
+        else:
+            raise ConverterException('Could not find a directory with MIDI')
+        if fp is None:
+            raise ConverterException('Could not find a directory with MIDI')
 
         dirLib = os.path.join(fp, 'testPrimitive')
         # a simple file created in athenacl
@@ -1554,9 +1671,9 @@ class Test(unittest.TestCase):
         #s.show()
         from fractions import Fraction as F
         dList = [n.quarterLength for n in s.flat.notesAndRests[:30]]
-        match = [0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 
-                 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 
-                 0.5, 0.5, 0.5, 0.5, F(1,3), F(1,3), F(1,3), 0.5, 0.5, 1.0]
+        match = [0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.5, 1.0, 0.5, 0.5,
+                 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
+                 0.5, 0.5, 0.5, 0.5, F(1, 3), F(1, 3), F(1, 3), 0.5, 0.5, 1.0]
         self.assertEqual(dList, match)
 
 
@@ -1633,7 +1750,8 @@ class Test(unittest.TestCase):
         # get a Stream object, not an opus
         #self.assertEqual(isinstance(op, stream.Score), True)
         self.assertEqual(isinstance(op, stream.Opus), True)
-        self.assertEqual([len(s.flat.notesAndRests) for s in op], [33, 51, 59, 33, 29, 174, 67, 88])
+        self.assertEqual([len(s.flat.notesAndRests) for s in op],
+                         [33, 51, 59, 33, 29, 174, 67, 88])
         #op.show()
 
         # get one work from the opus
@@ -1652,29 +1770,16 @@ class Test(unittest.TestCase):
         self.assertEqual(isinstance(s, stream.Score), True)
         self.assertEqual(s.metadata.title, 'Yi gan hongqi kongzhong piao')
         # make sure that beams are being made
-        self.assertEqual(str(s.parts[0].flat.notesAndRests[4].beams), '<music21.beam.Beams <music21.beam.Beam 1/start>/<music21.beam.Beam 2/start>>')
+        self.assertEqual(str(s.parts[0].flat.notesAndRests[4].beams),
+                '<music21.beam.Beams <music21.beam.Beam 1/start>/<music21.beam.Beam 2/start>>')
         #s.show()
 
 
 
     def testConversionMusedata(self):
-
-        from music21.musedata import testFiles
-
-        cmd = subConverters.ConverterMuseData()
-        cmd.parseData(testFiles.bach_cantata5_mvmt3)
-        unused_s = cmd.stream
-        #s.show()
-
-        # test data id
-        s = parse(testFiles.bach_cantata5_mvmt3)
-        self.assertEqual(s.metadata.title, 'Wo soll ich fliehen hin')
-        self.assertEqual(len(s.parts), 3)
-
-
-        fp = os.path.join(common.getSourceFilePath(), 'musedata', 'testZip.zip')
+        fp = os.path.join(common.getSourceFilePath(), 'musedata', 'testPrimitive', 'test01')
         s = parse(fp)
-        self.assertEqual(len(s.parts), 4)
+        self.assertEqual(len(s.parts), 5)
         #s.show()
 
 
@@ -1693,17 +1798,18 @@ class Test(unittest.TestCase):
         self.assertEqual(post[:38], '<?xml version="1.0" encoding="UTF-8"?>')
         self.assertEqual(af.getNames(), ['musicXML.xml', 'META-INF/', 'META-INF/container.xml'])
 
-        # test from a file that ends in zip
-        # note: this is a stage1 file!
-        fp = os.path.join(common.getSourceFilePath(), 'musedata', 'testZip.zip')
-        af = ArchiveManager(fp)
-        # for now, only support zip
-        self.assertEqual(af.archiveType, 'zip')
-        self.assertEqual(af.isArchive(), True)
-        self.assertEqual(af.getNames(), ['01/', '01/04', '01/02', '01/03', '01/01'] )
-
-        # returns a list of strings
-        self.assertEqual(af.getData(dataFormat='musedata')[0][:30], '378\n1080  1\nBach Gesells\nchaft')
+#         # test from a file that ends in zip
+#         # note: this is a stage1 file!
+#         fp = os.path.join(common.getSourceFilePath(), 'musedata', 'testZip.zip')
+#         af = ArchiveManager(fp)
+#         # for now, only support zip
+#         self.assertEqual(af.archiveType, 'zip')
+#         self.assertEqual(af.isArchive(), True)
+#         self.assertEqual(af.getNames(), ['01/', '01/04', '01/02', '01/03', '01/01'] )
+#
+#         # returns a list of strings
+#         self.assertEqual(af.getData(dataFormat='musedata')[0][:30],
+#                     '378\n1080  1\nBach Gesells\nchaft')
 
 
         #mdw = musedataModule.MuseDataWork()
@@ -1723,10 +1829,62 @@ class Test(unittest.TestCase):
         cmd = subConverters.ConverterMuseData()
         cmd.parseFile(fp)
 
+    def testMEIvsMX(self):
+        '''
+        Ensure Converter.parseData() distinguishes between a string with MEI data and a string with
+        MusicXML data. The "subConverter" module is mocked out because we don't actually need to
+        test the conversion process in this unit test.
+        '''
+        # These strings aren't valid documents, but they are enough to pass the detection we're
+        # testing in parseData(). But it does mean we'll be testing in a strange way.
+        meiString = '<?xml version="1.0" encoding="UTF-8"?><mei><note/></mei>'
+        #mxlString = ('<?xml version="1.0" encoding="UTF-8"?>' +
+        #                '<score-partwise><note/></score-partwise>')
+
+        # The "mei" module raises an MeiElementError with "meiString," so as long as that's raised,
+        # we know that parseData() chose correctly.
+        from music21.mei.base import MeiElementError
+        testConv = Converter()
+        self.assertRaises(MeiElementError, testConv.parseData, meiString)
+
+        # TODO: another test -- score-partwise is good enough for new converter.
+        ## The ConverterMusicXML raises a SubConverterException with "mxlString," so as long as
+        ## that's raised, we know that parseData()... well at least that it didn't choose MEI.
+        #from music21.converter.subConverters import SubConverterException
+        #testConv = Converter()
+        #self.assertRaises(SubConverterException, testConv.parseData, mxlString)
+
+    def testParseMidiQuantize(self):
+        '''
+        Checks quantization when parsing a stream. Here everything snaps to the 8th note.
+        '''
+        from music21 import omr
+        from music21.common import numberTools
+        midifp = omr.correctors.pathName + os.sep + 'k525short.mid'
+        midistream = parse(midifp, forceSource=True, storePickle=False, quarterLengthDivisors=[2])
+        #midistream.show()
+        for n in midistream.recurse(classFilter='Note'):
+            self.assertTrue(numberTools.almostEquals(n.quarterLength % .5, 0.0))
+
+
+    def testIncorrectNotCached(self):
+        '''
+        Here is a filename with an incorrect extension (.txt for .rnText).  Make sure that
+        it is not cached the second time...
+        '''
+        fp = os.path.join(common.getSourceFilePath(), 'converter', 'incorrectExtension.txt')
+        pf = PickleFilter(fp)
+        pf.removePickle()
+
+        with self.assertRaises(ConverterFileException):
+            parse(fp)
+
+        c = parse(fp, format='romantext')
+        self.assertEqual(len(c.recurse().getElementsByClass('Harmony')), 1)
 
 #-------------------------------------------------------------------------------
 # define presented order in documentation
-_DOC_ORDER = [parse, parseFile, parseData, parseURL, freeze, thaw, freezeStr, thawStr, 
+_DOC_ORDER = [parse, parseFile, parseData, parseURL, freeze, thaw, freezeStr, thawStr,
               Converter, registerSubconverter, unregisterSubconverter]
 
 

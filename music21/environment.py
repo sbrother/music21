@@ -6,37 +6,56 @@
 # Authors:      Christopher Ariza
 #               Michael Scott Cuthbert
 #
-# Copyright:    Copyright © 2009-2012 Michael Scott Cuthbert and the music21
+# Copyright:    Copyright © 2009-2017 Michael Scott Cuthbert and the music21
 #               Project
 # License:      LGPL or BSD, see license.txt
 #------------------------------------------------------------------------------
-from __future__ import print_function
-
 '''
 The environment module describes an object for accessing and setting
 variables related to the user's music21 environment. Such variables include
-the location of external applications such as MusicXML readers (e.g. Finale),
+the location of external applications such as MusicXML readers (e.g. MuseScore),
 whether music21 is allowed to download files directly (via the virtual corpus),
 and other settings.
 
 Additional documentation for and examples of using this module are found in
-:ref:`environment`.
+:ref:`User's Guide, Chapter 24, Environment <usersGuide_24_environment>`.
+
+# TODO: Update to user's guide
 '''
+from __future__ import print_function
+
 import os
 import sys
 import tempfile
 import unittest
-import xml.sax
+
+import xml.etree.ElementTree as ET
 from xml.sax import saxutils
 
 from music21 import exceptions21
 from music21 import common
-from music21 import xmlnode
 from music21.ext import six
 
 
 _MOD = 'environment.py'
 
+def etIndent(elem, level=0, spaces=2):
+    '''
+    indent an elementTree element for printing
+    '''
+    i = "\n" + level * spaces * " "
+    if len(elem): # pylint: disable=len-as-condition
+        if not elem.text or not elem.text.strip():
+            elem.text = i + spaces * " "
+        if not elem.tail or not elem.tail.strip():
+            elem.tail = i
+        for subEl in elem:
+            etIndent(subEl, level + 1)
+        if not elem.tail or not elem.tail.strip():
+            elem.tail = i
+    else:
+        if level and (not elem.tail or not elem.tail.strip()):
+            elem.tail = i
 
 #------------------------------------------------------------------------------
 
@@ -50,226 +69,61 @@ class UserSettingsException(EnvironmentException):
 
 
 #------------------------------------------------------------------------------
-
-
-class Settings(xmlnode.XMLNodeList):
+# this must be above EnvironmentSingleton
+class LocalCorpusSettings(list):
     '''
-    A settings object:
+    A lightweight object for storing the 'LocalCorpusSettings' tag in the
+    .music21rc
+    
+    It is a subclass of list and has two additional attributes, name (which
+    should be None for the unnamed localCorpus) and cacheFilePath
+    for a full filepath (ending in .json) as a location 
+    to store the .metadataBundle (.json) cache for the
+    LocalCorpus.  This can be None, in which case the (volitile) temp
+    directory is used.
+    
+    >>> lcs = environment.LocalCorpusSettings(['/tmp', '/home'])
+    >>> lcs
+    LocalCorpusSettings(['/tmp', '/home'])
+    
+    >>> lcs.name = 'theWholeEnchilada'
+    >>> lcs
+    LocalCorpusSettings(['/tmp', '/home'], name='theWholeEnchilada')
+    
+    >>> lcs.cacheFilePath = '/home/enchilada.json'
+    >>> lcs
+    LocalCorpusSettings(['/tmp', '/home'], 
+                        name='theWholeEnchilada', 
+                        cacheFilePath='/home/enchilada.json')
 
-    ::
 
-        >>> from music21 import environment
-        >>> a = environment.Settings()
-
+    >>> list(lcs)
+    ['/tmp', '/home']
+    >>> lcs.name
+    'theWholeEnchilada'
+    >>> lcs.cacheFilePath
+    '/home/enchilada.json'
+    >>> '/home' in lcs
+    True
+    >>> '/root' in lcs
+    False
     '''
-
-    ### INITIALIZER ###
-
-    def __init__(self):
-        xmlnode.XMLNodeList.__init__(self)
-        self._tag = 'settings'  # assumed for now
-        self.componentList = []  # list of Part objects
-
-    ### PRIVATE METHODS ###
-
-    def _getComponents(self):
-        return self.componentList
-
-
-class Preference(xmlnode.XMLNode):
-    '''
-    An xmlnode.XMLNode subclass representing a single environment preference:
-
-    ::
-
-        >>> from music21 import environment
-        >>> a = environment.Preference()
-
-    '''
-
-    ### INITIALIZER ###
-
-    # TODO: Make private class because there's no docs and no public interface.
-    def __init__(self):
-        xmlnode.XMLNode.__init__(self)
-        self._tag = 'preference'  # assumed for now
-        # attributes
-        self._attr['name'] = None
-        self._attr['value'] = None
-
-#     def loadAttrs(self, attrs):
-#         # thought that this would solve a bytes problem for Python3, but nope...
-#         try:
-#             x = attrs.getValue('value')
-#             print(repr(x), type(x))
-#         except KeyError:
-#             pass
-#         return xmlnode.XMLNode.loadAttrs(self, attrs)
-
-
-class LocalCorpusSettings(xmlnode.XMLNodeList):
-    '''
-
-    ::
-
-        >>> from music21 import environment
-        >>> a = environment.LocalCorpusSettings()
-
-    '''
-
-    ### INITIALIZER ###
-
-    def __init__(self, name=None):
-        xmlnode.XMLNode.__init__(self)
-        self._attr['name'] = name
-        self._tag = 'localCorpusSettings'  # assumed for now
-        self.componentList = []  # list of LocalCorpusPath objects
-
-    ### PRIVATE METHODS ###
-
-    def _getComponents(self):
-        return self.componentList
-
-
-class LocalCorporaSettings(xmlnode.XMLNodeList):
-    '''
-    An xmlnode.XMLNode subclass representing information about various
-    secondary local corpora:
-
-    ::
-
-        >>> from music21 import environment
-        >>> localCorpora = environment.LocalCorporaSettings()
-        >>> corpusA = environment.LocalCorpusSettings(name='A')
-        >>> corpusA.append(environment.LocalCorpusPath(path='foo'))
-        >>> corpusA.append(environment.LocalCorpusPath(path='bar'))
-        >>> corpusB = environment.LocalCorpusSettings(name='B')
-        >>> corpusB.append(environment.LocalCorpusPath(path='baz'))
-        >>> localCorpora.append(corpusA)
-        >>> localCorpora.append(corpusB)
-        >>> print(localCorpora.xmlStr())
-        <?xml version="1.0" ...?>
-        <localCorporaSettings>
-          <localCorpusSettings name="A">
-            <localCorpusPath>foo</localCorpusPath>
-            <localCorpusPath>bar</localCorpusPath>
-          </localCorpusSettings>
-          <localCorpusSettings name="B">
-            <localCorpusPath>baz</localCorpusPath>
-          </localCorpusSettings>
-        </localCorporaSettings>
-        <BLANKLINE>
-
-    '''
-
-    ### INITIALIZER ###
-
-    def __init__(self):
-        xmlnode.XMLNode.__init__(self)
-        self._tag = 'localCorporaSettings'
-        self.componentList = []
-
-    ### PRIVATE METHODS ###
-
-    def _getComponents(self):
-        return self.componentList
-
-
-class LocalCorpusPath(xmlnode.XMLNode):
-    '''
-    An xmlnode.XMLNode subclass representing a list of environment
-    preference:
-
-    ::
-
-        >>> from music21 import environment
-        >>> lcs = environment.LocalCorpusSettings()
-        >>> lcp = environment.LocalCorpusPath()
-        >>> lcp.charData = 'testing'
-        >>> lcs.append(lcp)
-        >>> print(lcs.xmlStr())
-        <?xml version="1.0" ...?>
-        <localCorpusSettings>
-        <localCorpusPath>testing</localCorpusPath>
-        </localCorpusSettings>
-        <BLANKLINE>
-    '''
-
-    ### INITIALIZER ###
-
-    def __init__(self, path=None):
-        xmlnode.XMLNode.__init__(self)
-        self._tag = 'localCorpusPath'  # assumed for now
-        self.charData = path  # char data stores path
-        # attributes
-
-
-#------------------------------------------------------------------------------
-
-
-class SettingsHandler(xml.sax.ContentHandler):
-    '''
-    An xml.sax.ContentHandler subclass holding settings:
-
-    ::
-
-        >>> from music21 import environment
-        >>> sh = environment.SettingsHandler()
-
-    '''
-    #TODO: Make private class because there's no docs and no public interface.
-
-    ### INITIALIZER ###
-
-    def __init__(self, tagLib=None):
-        self._characters = ''
-        self._objectStack = []
-        self._settings = None
-
-    ### PUBLIC METHODS ###
-
-    def characters(self, characters):
-        self._characters += characters
-
-    def endElement(self, name):
-        currentObject = self._objectStack.pop()
-        if isinstance(currentObject, Preference):
-            self._objectStack[-1].append(currentObject)
-        elif isinstance(currentObject, LocalCorpusPath):
-            currentObject.charData = self._characters.strip()
-            self._objectStack[-1].append(currentObject)
-        elif isinstance(currentObject, LocalCorporaSettings):
-            currentObject.componentList.sort(
-                key=lambda x: (x.__class__.__name__, x._attr.get('name')))
-            self._objectStack[-1].append(currentObject)
-        elif isinstance(currentObject, LocalCorpusSettings):
-            currentObject.componentList.sort(
-                key=lambda x: (x.__class__.__name__, x._attr.get('name')))
-            self._objectStack[-1].append(currentObject)
-        elif isinstance(currentObject, Settings):
-            currentObject.componentList.sort(
-                key=lambda x: (x.__class__.__name__, x._attr.get('name')))
-            self._settings = currentObject
-
-    def getSettings(self):
-        return self._settings
-
-    def startElement(self, name, attrs):
-        self._characters = ''
-        if name == 'preference':
-            slot = Preference()
-            slot.loadAttrs(attrs)
-        elif name == 'localCorporaSettings':
-            slot = LocalCorporaSettings()
-        elif name == 'localCorpusSettings':
-            slot = LocalCorpusSettings(name=attrs.get('name', None))
-        elif name == 'localCorpusPath':
-            slot = LocalCorpusPath()
-        elif name == 'settings':
-            slot = Settings()
-        self._objectStack.append(slot)
-
-
+    def __init__(self, paths=None, name=None, cacheFilePath=None):
+        if paths is None:
+            paths = []
+        super(LocalCorpusSettings, self).__init__(paths)
+        self.name = name
+        self.cacheFilePath = cacheFilePath
+        
+    def __repr__(self):
+        listRepr = super(LocalCorpusSettings, self).__repr__()
+        namePart = ''
+        mdbpPart = ''
+        if self.name is not None:
+            namePart = ', name=' + repr(self.name)
+        if self.cacheFilePath is not None:
+            mdbpPart = ', cacheFilePath=' + repr(self.cacheFilePath)
+        return 'LocalCorpusSettings({}{}{})'.format(listRepr, namePart, mdbpPart)
 #------------------------------------------------------------------------------
 
 
@@ -299,16 +153,19 @@ class _EnvironmentCore(object):
         # define all settings that are paths
         # store names of all values that are keys; check for validity
         self._keysToPaths = []
-        self._keysToPaths.append('braillePath')
-        self._keysToPaths.append('graphicsPath')
-        self._keysToPaths.append('lilypondPath')
-        self._keysToPaths.append('localCorpusPath')
-        self._keysToPaths.append('manualCoreCorpusPath')
-        self._keysToPaths.append('midiPath')
-        self._keysToPaths.append('musescoreDirectPNGPath')
-        self._keysToPaths.append('musicxmlPath')
-        self._keysToPaths.append('pdfPath')
-        self._keysToPaths.append('vectorPath')
+        for pathKey in [
+            'braillePath',
+            'graphicsPath',
+            'lilypondPath',
+            'localCorpusPath',
+            'manualCoreCorpusPath',
+            'midiPath', 
+            'musescoreDirectPNGPath',
+            'musicxmlPath',
+            'pdfPath',
+            'vectorPath',
+            ]:
+            self._keysToPaths.append(pathKey)
 
         # defines all valid keys in ref
         self._loadDefaults(forcePlatform=forcePlatform)
@@ -320,7 +177,7 @@ class _EnvironmentCore(object):
 
     def __getitem__(self, key):
         # could read file here to update from disk
-        # could store last update tim and look of file is more recent
+        # could store last update time and look of file is more recent
         # how, only doing read once is a bit more conservative
         #self.read()
 
@@ -330,11 +187,11 @@ class _EnvironmentCore(object):
             raise EnvironmentException('no preference: %s' % key)
         value = self._ref[key]
         if six.PY3 and isinstance(value, bytes):
-            value = value.decode(errors='replace')
-        
+            value = value.decode(encoding='utf-8', errors='replace')
+
         valueStr = str(value).lower()
 
-        if key in ['debug']:  # debug expects a number
+        if key == 'debug':  # debug expects a number
             if valueStr == 'true':
                 value = common.DEBUG_USER
             elif valueStr == 'false':
@@ -363,9 +220,11 @@ class _EnvironmentCore(object):
         # saxutils.escape(msg).encode('UTF-8')
 
         # add local corpus path as a key
-        if six.PY3 and isinstance(value, bytes):
-            value = value.decode(errors='replace')
-            
+        #if six.PY3 and isinstance(value, bytes):
+        #    value = value.decode(errors='replace')
+        if 'path' in key.lower() and value is not None:
+            value = common.cleanpath(value)
+
         if key not in self._ref:
             if key != 'localCorpusPath':
                 raise EnvironmentException('no preference: %s' % key)
@@ -387,7 +246,7 @@ class _EnvironmentCore(object):
                 valid = True
         elif key == 'localCorpusSettings':
             # needs to be a list of strings for now
-            if common.isListLike(value):
+            if isinstance(value, LocalCorpusSettings):
                 valid = True
         else:  # temporarily not validating other preferences
             valid = True
@@ -398,12 +257,11 @@ class _EnvironmentCore(object):
                     value, key))
 
         # need to escape problematic characters for xml storage
-        if common.isStr(value):
-            value = saxutils.escape(value).encode('UTF-8')
+        if isinstance(value, six.string_types):
+            value = saxutils.escape(value) #.encode('UTF-8')
         # set value
         if key == 'localCorpusPath':
             # only add if unique
-            value = xmlnode.fixBytes(value)
             if value not in self._ref['localCorpusSettings']:
                 # check for malicious values here
                 self._ref['localCorpusSettings'].append(value)
@@ -414,29 +272,39 @@ class _EnvironmentCore(object):
         return repr(self._ref)
 
     ### PRIVATE METHODS ###
-
-    def _fromSettings(self, settings, ref=None):
+    def _fromSettings(self, settingsTree, ref=None):
         '''
-        Load a ref dictionary from the Settings object. Change the passed-in
-        ref dictionary in place.
+        Takes in a ElementTree and possibly an already populated reference dictionary
+        (or creates a new one) and populates it.
         '''
         if ref is None:
             ref = {}
+        settings = settingsTree.getroot()
         for slot in settings:
-            if isinstance(slot, LocalCorpusSettings):
-                ref['localCorpusSettings'] = []
-                for lcp in slot:
-                    # validate paths on load
-                    fpCandidate = lcp.charData.strip()
-                    ref['localCorpusSettings'].append(fpCandidate)
-            elif isinstance(slot, LocalCorporaSettings):
+            if slot.tag == 'localCorpusSettings':
+                lcs = LocalCorpusSettings()
+                for slotChild in slot:
+                    if slotChild.tag == 'localCorpusPath':
+                        fpCandidate = slotChild.text.strip()
+                        lcs.append(fpCandidate)
+                    elif slotChild.tag == 'cacheFilePath':
+                        lcs.cacheFilePath = slotChild.text.strip()
+                ref['localCorpusSettings'] = lcs
+                        
+            elif slot.tag == 'localCorporaSettings':
                 ref['localCorporaSettings'] = {}
                 for localCorpusSettings in slot:
-                    name = localCorpusSettings._attr['name']
-                    ref['localCorporaSettings'][name] = []
-                    for localCorpusPath in localCorpusSettings:
-                        fpCandidate = localCorpusPath.charData.strip()
-                        ref['localCorporaSettings'][name].append(fpCandidate)
+                    name = localCorpusSettings.get('name')
+                    lcs = LocalCorpusSettings()
+                    lcs.name = name
+                    for slotChild in localCorpusSettings:
+                        if slotChild.tag == 'localCorpusPath':
+                            fpCandidate = slotChild.text.strip()
+                            lcs.append(fpCandidate)
+                        elif slotChild.tag == 'cacheFilePath':
+                            lcs.cacheFilePath = slotChild.text.strip()
+                    ref['localCorporaSettings'][name] = lcs
+
             else:
                 name = slot.get('name')
                 value = slot.get('value')
@@ -463,7 +331,7 @@ class _EnvironmentCore(object):
         self._ref['lilypondFormat'] = 'pdf'
         self._ref['lilypondBackend'] = 'ps'
 
-        # path to a MusicXML reader: default, will find "Finale Notepad"
+        # path to a MusicXML reader: default, will find "MuseScore"
         self._ref['musicxmlPath'] = None
 
         # path to a midi reader
@@ -486,7 +354,7 @@ class _EnvironmentCore(object):
         self._ref['musescoreDirectPNGPath'] = None
         self._ref['showFormat'] = 'musicxml'
         self._ref['writeFormat'] = 'musicxml'
-        self._ref['ipythonShowFormat'] = 'ipython.vexflow'
+        self._ref['ipythonShowFormat'] = 'ipython.musicxml.png'
 
         self._ref['autoDownload'] = 'ask'
         self._ref['debug'] = 0
@@ -496,7 +364,7 @@ class _EnvironmentCore(object):
         self._ref['warnings'] = 1
 
         # store a list of strings
-        self._ref['localCorpusSettings'] = []
+        self._ref['localCorpusSettings'] = LocalCorpusSettings()
         self._ref['localCorporaSettings'] = {}
 
         self._ref['manualCoreCorpusPath'] = None
@@ -509,6 +377,8 @@ class _EnvironmentCore(object):
         if platform == 'win':
             for name, value in [
                 ('lilypondPath', 'lilypond'),
+                ('musescoreDirectPNGPath',
+                    common.cleanpath(r'%PROGRAMFILES(x86)%\MuseScore 2\MuseScore.exe')),
                 ]:
                 self.__setitem__(name, value)  # use for key checking
         elif platform == 'nix':
@@ -516,55 +386,78 @@ class _EnvironmentCore(object):
                 self.__setitem__(name, value)  # use for key checking
         elif platform == 'darwin':
             for name, value in [
-                ('lilypondPath', '/Applications/Lilypond.app/Contents/Resources/bin/lilypond'),
-                ('musicxmlPath', '/Applications/Finale Notepad 2012.app'),
-                ('graphicsPath', '/Applications/Preview.app'),
-                ('vectorPath', '/Applications/Preview.app'),
-                ('pdfPath', '/Applications/Preview.app'),
-                ('midiPath', '/Applications/QuickTime Player.app'),
-                ('musescoreDirectPNGPath', '/Applications/MuseScore.app/Contents/MacOS/mscore'),
+                    ('lilypondPath', '/Applications/Lilypond.app/Contents/Resources/bin/lilypond'),
+                    ('musicxmlPath', '/Applications/MuseScore 2.app/Contents/MacOS/mscore'),
+                    ('graphicsPath', '/Applications/Preview.app'),
+                    ('vectorPath', '/Applications/Preview.app'),
+                    ('pdfPath', '/Applications/Preview.app'),
+                    ('midiPath', '/Applications/Utilities/QuickTime Player 7.app'),
+                    ('musescoreDirectPNGPath',
+                        '/Applications/MuseScore 2.app/Contents/MacOS/mscore'),
                 ]:
                 self.__setitem__(name, value)  # use for key checking
 
-    def _toSettings(self, ref):
+    def toSettingsXML(self, ref=None):
         '''
-        Convert a ref dictionary to a Settings object.
+        Convert a ref dictionary to an xml.etree.ElementTree.Element object
+        with root "<settings>" and return that object
         '''
-        settings = Settings()
+        if ref is None:
+            ref = self._ref
+
+        settingsDict = {'encoding': 'utf-8'}
+        settings = ET.Element('settings', settingsDict)
+
+        settingsTree = ET.ElementTree(settings)
         for key, value in sorted(ref.items()):
+            lcs = value
+            # assert isinstance(lcs, LocalCorpusSettings)
             if key == 'localCorpusSettings':
-                localCorpusSettings = LocalCorpusSettings()
-                for filePath in sorted(value):
-                    filePath = xmlnode.fixBytes(filePath)
-                    localCorpusPath = LocalCorpusPath(path=filePath)
+                localCorpusSettings = ET.Element('localCorpusSettings')
+                for filePath in sorted(lcs):
+                    localCorpusPath = ET.Element('localCorpusPath')
+                    if filePath is not None:
+                        localCorpusPath.text = filePath
                     localCorpusSettings.append(localCorpusPath)
+                if lcs.cacheFilePath is not None:
+                    mdbp = ET.Element('cacheFilePath')
+                    mdbp.text = lcs.cacheFilePath
+                    localCorpusSettings.append(mdbp)
+                    
                 settings.append(localCorpusSettings)
             elif key == 'localCorporaSettings':
-                localCorporaSettings = LocalCorporaSettings()
-                for name, paths in sorted(value.items()):
-                    localCorpusSettings = LocalCorpusSettings(name=name)
-                    for path in sorted(paths):
-                        path = xmlnode.fixBytes(path)
-                        localCorpusPath = LocalCorpusPath(path=path)
+                localCorporaSettings = ET.Element('localCorporaSettings')
+                for name, lcs in sorted(value.items()):
+                    localCorpusSettings = ET.Element('localCorpusSettings', name=name)
+                    for filePath in sorted(lcs):
+                        localCorpusPath = ET.Element('localCorpusPath')
+                        if filePath is not None:
+                            localCorpusPath.text = filePath
                         localCorpusSettings.append(localCorpusPath)
+                    if lcs.cacheFilePath is not None:
+                        mdbp = ET.Element('cacheFilePath')
+                        mdbp.text = lcs.cacheFilePath
+                        localCorpusSettings.append(mdbp)
+                    
                     localCorporaSettings.append(localCorpusSettings)
                 settings.append(localCorporaSettings)
             else:
-                slot = Preference()
-                slot.set('name', key)
-                value = xmlnode.fixBytes(value)
-                slot.set('value', value)
+                #value = fixBytes(value)
+                attribs = {'name': key}
+                if value is not None:
+                    attribs['value'] = str(value)
+                slot = ET.Element('preference', attribs)
                 settings.append(slot)
-        return settings
+        return settingsTree
 
     ### PUBLIC METHODS ###
 
     def getDefaultRootTempDir(self):
         '''
         returns whatever tempfile.gettempdir() returns plus 'music21'.
-        
+
         Creates the subdirectory if it doesn't exist:
-        
+
         >>> import tempfile
         >>> t = tempfile.gettempdir()
         >>> #_DOCS_SHOW t
@@ -591,7 +484,7 @@ class _EnvironmentCore(object):
     def getKeysToPaths(self):
         '''
         Find all keys that refer to paths
-        
+
         >>> e = environment.Environment()
         >>> for i in e.getKeysToPaths():
         ...     #_DOCS_SHOW print(i)
@@ -607,7 +500,7 @@ class _EnvironmentCore(object):
     def getRefKeys(self):
         '''
         Find all keys (in any order)...
-        
+
         >>> e = environment.Environment()
         >>> for i in e.getRefKeys():
         ...     #_DOCS_SHOW print(i)
@@ -625,7 +518,7 @@ class _EnvironmentCore(object):
     def getRootTempDir(self):
         '''
         gets either the directory in key 'directoryScratch' or self.getDefaultRootTempDir
-        
+
         Returns an exception if directoryScratch is defined but does not exist.
         '''
         if self._ref['directoryScratch'] is None:
@@ -646,9 +539,8 @@ class _EnvironmentCore(object):
             # this is not available on all windows versions
             if 'APPDATA' in os.environ:
                 directory = os.environ['APPDATA']
-            elif ('USERPROFILE' in os.environ and
-                os.path.exists(os.path.join(
-                    os.environ['USERPROFILE'], 'Application Data'))):
+            elif ('USERPROFILE' in os.environ
+                  and os.path.exists(os.path.join(os.environ['USERPROFILE'], 'Application Data'))):
                 directory = os.path.join(
                     os.environ['USERPROFILE'],
                     'Application Data',
@@ -657,7 +549,6 @@ class _EnvironmentCore(object):
                 directory = os.path.expanduser('~')
             return os.path.join(directory, 'music21-settings.xml')
         elif platform in ['nix', 'darwin']:
-            # alt : os.path.expanduser('~')
             # might not exist if running as nobody in a webserver...
             if 'HOME' in os.environ:
                 directory = os.environ['HOME']
@@ -675,6 +566,9 @@ class _EnvironmentCore(object):
         '''
         # get the root dir, which may be the user-specified dir
         rootDir = self.getRootTempDir()
+        if suffix and not suffix.startswith('.'):
+            suffix = '.' + suffix
+
 
         if common.getPlatform() != 'win':
             fileDescriptor, filePath = tempfile.mkstemp(
@@ -683,18 +577,13 @@ class _EnvironmentCore(object):
                 # on MacOS, fd returns an int, like 3, when this is called
                 # in some context (specifically, programmatically in a
                 # TestExternal class. the filePath is still valid and works
-                pass
+                os.close(fileDescriptor)
             else:
                 fileDescriptor.close()
         else:  # win
-            if sys.hexversion < 0x02030000:
-                raise EnvironmentException(
-                    'Need at least Version 2.3 on Windows to create temporary '
-                    'files!')
-            else:
-                tf = tempfile.NamedTemporaryFile(dir=rootDir, suffix=suffix)
-                filePath = tf.name
-                tf.close()
+            tf = tempfile.NamedTemporaryFile(dir=rootDir, suffix=suffix)
+            filePath = tf.name
+            tf.close()
         #self.printDebug([_MOD, 'temporary file:', filePath])
         return filePath
 
@@ -704,7 +593,7 @@ class _EnvironmentCore(object):
     def formatToKey(self, m21Format):
         '''
         Finds the appropriate key to the file/app that can launch the given format:
-        
+
         >>> e = environment.Environment()
         >>> e.formatToKey('lilypond')
         'lilypondPath'
@@ -739,7 +628,7 @@ class _EnvironmentCore(object):
             environmentKey = 'vectorPath'
         elif m21Format == 'pdf':
             environmentKey = 'pdfPath'
-        elif m21Format == 'musicxml':
+        elif m21Format in ('musicxml', 'oldmusicxml'):
             environmentKey = 'musicxmlPath'
         elif m21Format == 'midi':
             environmentKey = 'midiPath'
@@ -748,6 +637,9 @@ class _EnvironmentCore(object):
         return environmentKey
 
     def formatToApp(self, m21Format):
+        '''
+        Given a format, return the app that will launch it.
+        '''
         environmentKey = self.formatToKey(m21Format)
         if environmentKey is not None:
             if environmentKey not in self._ref:
@@ -755,9 +647,15 @@ class _EnvironmentCore(object):
             return self._ref[environmentKey]
         return None
 
+
+    #@common.deprecated("May 24, 2014", "May 2016", "call SubConverter().launch() instead")
     def launch(self, fmt, filePath, options='', app=None):
         '''
-        DEPRECATED May 24 -- call Launch on SubConverter
+        DEPRECATED May 24, 2014 -- call Launch on SubConverter
+
+        Needed still just for graphics, graph.launch('png'), lily.translate(), scale
+
+        Create a png, svg, etc. converter (or just a graphics converter) and call launch on it
         '''
         # see common.fileExtensions for format names
         m21Format, unused_ext = common.findFormat(fmt)
@@ -775,7 +673,7 @@ class _EnvironmentCore(object):
 
                 webbrowser.open(filePath)
                 return
-            except:
+            except ImportError:
                 print('Cannot open webbrowser, sorry. Go to file://{}'.format(
                     filePath))
         if app is not None:
@@ -799,13 +697,13 @@ class _EnvironmentCore(object):
                     with open(filePath, 'r') as f:
                         for line in f:
                             print(line, end="")
-                        print
-                    return                    
+                        print("")
+                    return
                 else:
                     raise EnvironmentException(
                         "Cannot find a valid application path for format {}. "
                         "Specify this in your Environment by calling "
-                        "environment.set({!r}, 'pathToApplication')".format(
+                        "environment.set({!r}, '/path/to/application')".format(
                             m21Format, environmentKey))
         elif platform == 'win':  # note extra set of quotes!
             cmd = '""%s" %s "%s""' % (fpApp, options, filePath)
@@ -816,43 +714,46 @@ class _EnvironmentCore(object):
         os.system(cmd)
 
     def read(self, filePath=None):
+        '''
+        Read the environment file from .music21rc and call _fromSettings
+        Called only once per music21 instance.
+        '''
         if filePath is None:
             filePath = self.getSettingsPath()
         if not os.path.exists(filePath):
             return None  # do nothing if no file exists
-        saxparser = xml.sax.make_parser()
-        saxparser.setFeature(xml.sax.handler.feature_external_ges, 0)
-        saxparser.setFeature(xml.sax.handler.feature_external_pes, 0)
-        saxparser.setFeature(xml.sax.handler.feature_namespaces, 0)
-        h = SettingsHandler()
-        saxparser.setContentHandler(h)
-#         if six.PY2:
-#             openStyle = 'r'
-#         else:
-#             openStyle = 'rt'
-#         
-        openStyle = 'r'
-        with open(filePath, openStyle) as f:
-            saxparser.parse(f)
+
+        try:
+            settingsTree = ET.parse(filePath)
+        except ET.ParseError as pe:
+            raise EnvironmentException(
+                    'Cannot parse file %s: %s' %
+                                           (filePath, str(pe)))
         # load from XML into dictionary
         # updates self._ref in place
-        self._fromSettings(h.getSettings(), self._ref)
+        self._fromSettings(settingsTree, self._ref)
 
     def restoreDefaults(self):
+        '''
+        Changes everything to default but does not write.
+        '''
         self._ref = {}
         self._loadDefaults()  # defines all valid keys in ref
 
     def write(self, filePath=None):
+        '''
+        Write the .music21rc using `.getSettingsPath` and `.toSettingsXML`.
+        '''
         if filePath is None:
             filePath = self.getSettingsPath()
-        # need to use __getitem__ here b/c need to covnert debug value
+        # need to use __getitem__ here b/c need to convert debug value
         # to an integer
         directory = os.path.split(filePath)[0]
         if filePath is None or not os.path.exists(directory):
-            raise EnvironmentException('bad file path: %s' % filePath)
-        settings = self._toSettings(self._ref)
-        with open(filePath, 'w') as f:
-            f.write(settings.xmlStr())
+            raise EnvironmentException('bad file path for .music21rc: %s' % filePath)
+        settingsTree = self.toSettingsXML()
+        etIndent(settingsTree.getroot())
+        settingsTree.write(filePath, encoding='utf-8')
 
 
 #------------------------------------------------------------------------------
@@ -866,6 +767,12 @@ _environStorage = {'instance': None, 'forcePlatform': None}
 # create singleton instance
 _environStorage['instance'] = _EnvironmentCore()
 
+def envSingleton():
+    '''
+    returns the _environStorage['instance'], _EnvironmentCore singleton
+    object
+    '''
+    return _environStorage['instance']
 
 #------------------------------------------------------------------------------
 class Environment(object):
@@ -884,14 +791,10 @@ class Environment(object):
     For more a user-friendly interface for creating and editing settings, see
     the :class:`~music21.environment.UserSettings` object.
 
-    ::
-
-        >>> from music21 import environment
-        >>> env = environment.Environment(forcePlatform='darwin')
-        >>> env['musicxmlPath'] = '/Applications/Finale Reader.app'
-        >>> env['musicxmlPath']
-        '/Applications/Finale Reader.app'
-
+    >>> env = environment.Environment(forcePlatform='darwin')
+    >>> env['musicxmlPath'] = '/Applications/Finale Reader.app'
+    >>> env['musicxmlPath']
+    '/Applications/Finale Reader.app'
     '''
 
     # define order to present names in documentation; use strings
@@ -919,31 +822,26 @@ class Environment(object):
         environment settings would look like on another OS platform (e.g., win,
         nix, darwin).
 
-        ::
-
-            >>> from music21 import environment
-            >>> myEnv = environment.Environment()
-            >>> post = myEnv['writeFormat']
-            >>> #_DOCS_SHOW post
-            >>> print("\'musicxml\'") #_DOCS_HIDE
-            'musicxml'
-
+        >>> myEnv = environment.Environment()
+        >>> post = myEnv['writeFormat']
+        >>> #_DOCS_SHOW post
+        >>> print("\'musicxml\'") #_DOCS_HIDE
+        'musicxml'
         '''
         self.modNameParent = modName
         # only re-create the instance if forcing a different platform
         # this only happens in testing
         # otherwise, delegate all calls to the module-level instance
         if forcePlatform != _environStorage['forcePlatform']:
-            _environStorage['instance'] = _EnvironmentCore(
-                forcePlatform=forcePlatform)
+            _environStorage['instance'] = _EnvironmentCore(forcePlatform=forcePlatform)
 
     ### SPECIAL METHODS ###
 
     def __getitem__(self, key):
-        return _environStorage['instance'].__getitem__(key)
+        return envSingleton().__getitem__(key)
 
     def __repr__(self):
-        return _environStorage['instance'].__repr__()
+        return envSingleton().__repr__()
 
     def __setitem__(self, key, value):
         '''
@@ -951,37 +849,29 @@ class Environment(object):
 
         Must call write() to make permanent:
 
-        ::
+        >>> a = environment.Environment()
+        >>> a['debug'] = 1
+        >>> a['graphicsPath'] = '/test&Encode'
+        >>> a['graphicsPath']
+        '/test&amp;Encode'
 
-            >>> from music21 import environment
-            >>> a = environment.Environment()
-            >>> a['debug'] = 1
-            >>> a['graphicsPath'] = '/test&Encode'
-            >>> a['graphicsPath']
-            '/test&amp;Encode'
+        >>> a['autoDownload'] = 'adsf'
+        Traceback (most recent call last):
+        music21.environment.EnvironmentException: adsf is not an acceptable
+            value for preference: autoDownload
 
-        ::
+        >>> a['showFormat'] = 'adsf'
+        Traceback (most recent call last):
+        music21.environment.EnvironmentException: adsf is not an acceptable
+            value for preference: showFormat
 
-            >>> a['autoDownload'] = 'adsf'
-            Traceback (most recent call last):
-            EnvironmentException: adsf is not an acceptable value for preference: autoDownload
-
-        ::
-
-            >>> a['showFormat'] = 'adsf'
-            Traceback (most recent call last):
-            EnvironmentException: adsf is not an acceptable value for preference: showFormat
-
-        ::
-
-            >>> a['showFormat'] = 'musicxml'
-            >>> a['localCorpusPath'] = '/path/to/local'
-
+        >>> a['showFormat'] = 'musicxml'
+        >>> a['localCorpusPath'] = '/path/to/local'
         '''
-        _environStorage['instance'].__setitem__(key, value)
+        envSingleton().__setitem__(key, value)
 
     def __str__(self):
-        return _environStorage['instance'].__str__()
+        return envSingleton().__str__()
 
     ### PUBLIC METHODS ###
 
@@ -997,33 +887,30 @@ class Environment(object):
         If not able to create a 'music21' directory, the standard default is
         returned.
         '''
-        dstDir = _environStorage['instance'].getDefaultRootTempDir()
+        dstDir = envSingleton().getDefaultRootTempDir()
         self.printDebug([_MOD, 'using temporary directory:', dstDir])
         return dstDir
 
     def getKeysToPaths(self):
         ''' Get the keys that refer to file paths.
 
-        ::
-
-            >>> from music21 import environment
-            >>> a = environment.Environment()
-            >>> for x in sorted(a.getKeysToPaths()):
-            ...     x
-            ...
-            'braillePath'
-            'graphicsPath'
-            'lilypondPath'
-            'localCorpusPath'
-            'manualCoreCorpusPath'
-            'midiPath'
-            'musescoreDirectPNGPath'
-            'musicxmlPath'
-            'pdfPath'
-            'vectorPath'
+        >>> a = environment.Environment()
+        >>> for x in sorted(a.getKeysToPaths()):
+        ...     x
+        ...
+        'braillePath'
+        'graphicsPath'
+        'lilypondPath'
+        'localCorpusPath'
+        'manualCoreCorpusPath'
+        'midiPath'
+        'musescoreDirectPNGPath'
+        'musicxmlPath'
+        'pdfPath'
+        'vectorPath'
 
         '''
-        return _environStorage['instance'].getKeysToPaths()
+        return envSingleton().getKeysToPaths()
 
     def getRefKeys(self):
         '''
@@ -1032,37 +919,33 @@ class Environment(object):
         These are different than the keys() method in that the
         'localCorpusPath' entry is not included.
 
-        ::
-
-            >>> from music21 import environment
-            >>> a = environment.Environment()
-            >>> for x in sorted(a.getRefKeys()):
-            ...     x
-            ...
-            'autoDownload'
-            'braillePath'
-            'debug'
-            'directoryScratch'
-            'graphicsPath'
-            'ipythonShowFormat'
-            'lilypondBackend'
-            'lilypondFormat'
-            'lilypondPath'
-            'lilypondVersion'
-            'localCorporaSettings'
-            'localCorpusSettings'
-            'manualCoreCorpusPath'
-            'midiPath'
-            'musescoreDirectPNGPath'
-            'musicxmlPath'
-            'pdfPath'
-            'showFormat'
-            'vectorPath'
-            'warnings'
-            'writeFormat'
-
+        >>> a = environment.Environment()
+        >>> for x in sorted(a.getRefKeys()):
+        ...     x
+        ...
+        'autoDownload'
+        'braillePath'
+        'debug'
+        'directoryScratch'
+        'graphicsPath'
+        'ipythonShowFormat'
+        'lilypondBackend'
+        'lilypondFormat'
+        'lilypondPath'
+        'lilypondVersion'
+        'localCorporaSettings'
+        'localCorpusSettings'
+        'manualCoreCorpusPath'
+        'midiPath'
+        'musescoreDirectPNGPath'
+        'musicxmlPath'
+        'pdfPath'
+        'showFormat'
+        'vectorPath'
+        'warnings'
+        'writeFormat'
         '''
-        return _environStorage['instance'].getRefKeys()
+        return envSingleton().getRefKeys()
 
     def getRootTempDir(self):
         '''
@@ -1071,20 +954,20 @@ class Environment(object):
         gets the system-provided directory (with a music21 subdirectory, if
         possible).
         '''
-        return _environStorage['instance'].getRootTempDir()
+        return envSingleton().getRootTempDir()
 
     def getSettingsPath(self):
         '''
         Return the path to the platform specific settings file.
         '''
-        return _environStorage['instance'].getSettingsPath()
+        return envSingleton().getSettingsPath()
 
     def getTempFile(self, suffix=''):
         '''
         Return a file path to a temporary file with the specified suffix (file
         extension).
         '''
-        filePath = _environStorage['instance'].getTempFile(suffix=suffix)
+        filePath = envSingleton().getTempFile(suffix=suffix)
         self.printDebug([_MOD, 'temporary file:', filePath])
         return filePath
 
@@ -1092,7 +975,6 @@ class Environment(object):
         '''
         Return valid keys to get and set values for the Environment instance.
 
-        >>> from music21 import environment
         >>> e = environment.Environment()
         >>> for x in sorted(list(e.keys())):
         ...     x
@@ -1119,15 +1001,14 @@ class Environment(object):
         'vectorPath'
         'warnings'
         'writeFormat'
-
         '''
-        return _environStorage['instance'].keys()
+        return envSingleton().keys()
 
     def formatToApp(self, m21Format):
-        return _environStorage['instance'].formatToApp(m21Format)
+        return envSingleton().formatToApp(m21Format)
 
     def formatToKey(self, m21Format):
-        return _environStorage['instance'].formatToKey(m21Format)
+        return envSingleton().formatToKey(m21Format)
 
     def launch(self, fmt, filePath, options='', app=None):
         '''
@@ -1141,8 +1022,7 @@ class Environment(object):
 
         TODO: Switch to module subprocess to prevent hanging.
         '''
-        return _environStorage['instance'].launch(fmt, filePath,
-                options=options, app=app)
+        return envSingleton().launch(fmt, filePath, options=options, app=app)
 
     def printDebug(self, msg, statusLevel=common.DEBUG_USER, debugFormat=None):
         '''
@@ -1150,8 +1030,8 @@ class Environment(object):
         The first arg can be a list of strings or a string; lists are
         concatenated with common.formatStr().
         '''
-        if _environStorage['instance'].__getitem__('debug') >= statusLevel:
-            if common.isStr(msg):
+        if envSingleton().__getitem__('debug') >= statusLevel:
+            if isinstance(msg, six.string_types):
                 msg = [msg]  # make into a list
             if msg[0] != self.modNameParent and self.modNameParent is not None:
                 msg = [self.modNameParent + ':'] + msg
@@ -1166,42 +1046,39 @@ class Environment(object):
         will ever be written unless manually done so. If no preference file
         exists, the method returns None.
         '''
-        return _environStorage['instance'].read(filePath=filePath)
+        return envSingleton().read(filePath=filePath)
 
     def restoreDefaults(self):
         '''
         Restore only defaults for all parameters. Useful for testing.
 
-        ::
-
-            >>> from music21 import environment
-            >>> a = environment.Environment()
-            >>> a['debug'] = 1
-            >>> a.restoreDefaults()
-            >>> a['debug']
-            0
+        >>> a = environment.Environment()
+        >>> a['debug'] = 1
+        >>> a.restoreDefaults()
+        >>> a['debug']
+        0
 
         And we can ``read()`` the environment settings back from our
         configuration file to restore our normal working environment.
 
-        ::
-
-            >>> a = environment.Environment().read()
-
+        >>> a = environment.Environment().read()
         '''
-        _environStorage['instance'].restoreDefaults()
+        envSingleton().restoreDefaults()
 
     def warn(self, msg, header=None):
         '''
         To print a warning to the user, send a list of strings to this method.
         Similar to printDebug but even if debug is off.
         '''
-        if common.isStr(msg):
+        if isinstance(msg, six.string_types):
             msg = [msg]  # make into a list
         elif isinstance(msg, dict):
             msg = [repr(msg)]
         elif common.isNum(msg):
             msg = [str(msg)]
+        elif isinstance(msg, Exception):
+            msg = [str(msg)]
+
         if header is None:
             if msg[0] != self.modNameParent and self.modNameParent is not None:
                 msg = [self.modNameParent + ': WARNING:'] + msg
@@ -1216,8 +1093,48 @@ class Environment(object):
         any changes made to the object and access preferences later.
         If `filePath` is None, the default storage location will be used.
         '''
-        return _environStorage['instance'].write(filePath=filePath)
+        return envSingleton().write(filePath=filePath)
 
+    def xmlReaderType(self):
+        r'''
+        Returns an xmlReaderType depending on the 'musicxmlPath'
+
+        >>> a = environment.Environment()
+        >>> a['musicxmlPath'] = '/Applications/Musescore.app'
+        >>> a.xmlReaderType()
+        'Musescore'
+        >>> a['musicxmlPath'] = '/Applications/Sibelius 7.app'
+        >>> a.xmlReaderType()
+        'Sibelius'
+        >>> a['musicxmlPath'] = r'C:\Program Files\Finale\Finale 2014.exe'
+        >>> a.xmlReaderType()
+        'Finale'
+
+        Nostalgia is unknown...
+
+        >>> a['musicxmlPath'] = r'C:\Program Files\Deluxe Music Construction Set.exe'
+        >>> a.xmlReaderType()
+        'unknown'
+
+        >>> a['musicxmlPath'] = None
+        >>> a.xmlReaderType() is None
+        True
+        '''
+        xp = self['musicxmlPath']
+        if common.runningUnderIPython():
+            xp = self['musescoreDirectPNGPath']
+
+        if xp is None:
+            return None
+        xp = xp.lower()
+        if 'sibelius' in xp:
+            return 'Sibelius'
+        elif 'finale' in xp:
+            return 'Finale'
+        elif 'musescore' in xp:
+            return 'Musescore'
+        else:
+            return 'unknown'
 
 #------------------------------------------------------------------------------
 
@@ -1227,53 +1144,47 @@ class UserSettings(object):
     The UserSettings object provides a simple interface for configuring the
     user preferences in the :class:`~music21.environment.Environment` object.
 
+    It automatically writes all changes to disk.
+
     First, create an instance of UserSettings:
 
-    ::
-
-        >>> from music21 import environment
-        >>> us = environment.UserSettings()
+    >>> us = environment.UserSettings()
 
     Second, view the available settings keys.
 
-    ::
-
-        >>> for key in sorted(us.keys()):
-        ...     key
-        ...
-        'autoDownload'
-        'braillePath'
-        'debug'
-        'directoryScratch'
-        'graphicsPath'
-        'ipythonShowFormat'
-        'lilypondBackend'
-        'lilypondFormat'
-        'lilypondPath'
-        'lilypondVersion'
-        'localCorporaSettings'
-        'localCorpusPath'
-        'localCorpusSettings'
-        'manualCoreCorpusPath'
-        'midiPath'
-        'musescoreDirectPNGPath'
-        'musicxmlPath'
-        'pdfPath'
-        'showFormat'
-        'vectorPath'
-        'warnings'
-        'writeFormat'
+    >>> for key in sorted(us.keys()):
+    ...     key
+    'autoDownload'
+    'braillePath'
+    'debug'
+    'directoryScratch'
+    'graphicsPath'
+    'ipythonShowFormat'
+    'lilypondBackend'
+    'lilypondFormat'
+    'lilypondPath'
+    'lilypondVersion'
+    'localCorporaSettings'
+    'localCorpusPath'
+    'localCorpusSettings'
+    'manualCoreCorpusPath'
+    'midiPath'
+    'musescoreDirectPNGPath'
+    'musicxmlPath'
+    'pdfPath'
+    'showFormat'
+    'vectorPath'
+    'warnings'
+    'writeFormat'
 
     Third, after finding the desired setting, supply the new value as a Python
     dictionary key value pair. Setting this value updates the user's settings
     file. For example, to set the file path to the Application that will be
     used to open MusicXML files, use the 'musicxmlPath' key.
 
-    ::
-
-        >>> #_DOCS_SHOW us['musicxmlPath'] = '/Applications/Finale Reader.app'
-        >>> #_DOCS_SHOW us['musicxmlPath']
-        u'/Applications/Finale Reader.app'
+    >>> #_DOCS_SHOW us['musicxmlPath'] = '/Applications/Finale Reader.app'
+    >>> #_DOCS_SHOW us['musicxmlPath']
+    u'/Applications/Finale Reader.app'
 
     Note that the 'localCorpusPath' setting operates in a slightly different
     manner than other settings. Each time the 'localCorpusPath' setting is set,
@@ -1283,11 +1194,9 @@ class UserSettings(object):
     settings. This setting can also be used to set a complete list of file
     paths.
 
-    ::
-
-        >>> #_DOCS_SHOW us['localCorpusPath'] = '~/Documents'
-        >>> #_DOCS_SHOW us['localCorpusSettings']
-        ['~/Documents']
+    >>> #_DOCS_SHOW us['localCorpusPath'] = '~/Documents'
+    >>> #_DOCS_SHOW list(us['localCorpusSettings'])
+    ['~/Documents']
 
     Alternatively, the environment.py module provides convenience functions for
     setting these settings: :func:`~music21.environment.keys`,
@@ -1310,11 +1219,8 @@ class UserSettings(object):
         '''
         Return a string representation.
 
-        ::
-
-            >>> from music21 import environment
-            >>> us = environment.UserSettings()
-            >>> post = repr(us) # location specific, cannot test
+        >>> us = environment.UserSettings()
+        >>> post = repr(us) # location specific, cannot test
 
         '''
         return self._environment.__repr__()
@@ -1323,12 +1229,8 @@ class UserSettings(object):
         '''
         Return a string representation.
 
-        ::
-
-            >>> from music21 import environment
-            >>> us = environment.UserSettings()
-            >>> post = repr(us) # location specific, cannot test
-
+        >>> us = environment.UserSettings()
+        >>> post = repr(us) # location specific, cannot test
         '''
         return self._environment.__str__()
 
@@ -1337,20 +1239,16 @@ class UserSettings(object):
         Dictionary-like setting. Changes are made and written to the user
         configuration file.
 
-        ::
+        >>> us = environment.UserSettings()
+        >>> us['musicxmlPath'] = 'asdfwerasdffasdfwer'
+        Traceback (most recent call last):
+        music21.environment.UserSettingsException: attempting to set a value
+            to a path that does not exist: ...asdfwerasdffasdfwer
 
-            >>> from music21 import environment
-            >>> us = environment.UserSettings()
-            >>> us['musicxmlPath'] = 'asdfwerasdffasdfwer'
-            Traceback (most recent call last):
-            UserSettingsException: attempting to set a path that does not exist: asdfwerasdffasdfwer
-
-        ::
-
-            >>> us['localCorpusPath'] = '/path/to/local'
-            Traceback (most recent call last):
-            UserSettingsException: attempting to set a path that does not exist: /path/to/local
-
+        >>> us['localCorpusPath'] = '/path/to/local'
+        Traceback (most recent call last):
+        music21.environment.UserSettingsException: attempting to set a value
+            to a path that does not exist: /path/to/local
         '''
         # NOTE: testing setting of any UserSettings key will result
         # in a change in your local preferences files
@@ -1359,17 +1257,30 @@ class UserSettings(object):
         # this will accept localCorpusPath
         if key in self._environment.getKeysToPaths():
             # try to expand user if found; otherwise return unaltered
-            if value is not None:
-                value = os.path.expanduser(value)
+            if value is not None and value != '/skip':
+                value = common.cleanpath(value)
                 if not os.path.exists(value):
                     raise UserSettingsException(
-                        'attempting to set a path that does not exist: {}'.format(
+                        'attempting to set a value to a path that does not exist: {}'.format(
                             value))
         # when setting a local corpus setting, if not a list, append
         elif key == 'localCorpusSettings':
             if not common.isListLike(value):
                 raise UserSettingsException(
                     'localCorpusSettings must be provided as a list.')
+        elif key == 'localCorporaSettings':
+            if not isinstance(value, dict):
+                raise UserSettingsException(
+                    'localCorporaSettings must be provided as a dict.')
+            if value:
+                for innerKey, innerValue in value.values():
+                    if not isinstance(innerKey, six.string_types):
+                        raise UserSettingsException(
+                            'Each key in localCorporaSettings must be a string.')
+                    if not common.isListLike(innerValue):
+                        raise UserSettingsException(
+                            'Each entry in localCorporaSettings must point to a list.')
+
         # location specific, cannot test further
         self._environment.__setitem__(key, value)
         self._environment.write()
@@ -1433,50 +1344,17 @@ def keys():
     return us.keys()
 
 
+# pylint: disable=redefined-builtin
 def set(key, value):  # okay to override set here: @ReservedAssignment
     '''
     Directly set a single UserSettings key, by providing a key and the
     appropriate value. This will create a user settings file if necessary.
 
-    ::
+    >>> environment.set('wer', 'asdf')
+    Traceback (most recent call last):
+    music21.environment.EnvironmentException: no preference: wer
 
-        >>> from music21 import environment
-        >>> for x in sorted(environment.keys()):
-        ...     x
-        ...
-        'autoDownload'
-        'braillePath'
-        'debug'
-        'directoryScratch'
-        'graphicsPath'
-        'ipythonShowFormat'
-        'lilypondBackend'
-        'lilypondFormat'
-        'lilypondPath'
-        'lilypondVersion'
-        'localCorporaSettings'
-        'localCorpusPath'
-        'localCorpusSettings'
-        'manualCoreCorpusPath'
-        'midiPath'
-        'musescoreDirectPNGPath'
-        'musicxmlPath'
-        'pdfPath'
-        'showFormat'
-        'vectorPath'
-        'warnings'
-        'writeFormat'
-
-    ::
-
-        >>> environment.set('wer', 'asdf')
-        Traceback (most recent call last):
-        EnvironmentException: no preference: wer
-
-    ::
-
-        >>> #_DOCS_SHOW environment.set('musicxmlPath', '/Applications/Finale Reader.app')
-
+    >>> #_DOCS_SHOW environment.set('musicxmlPath', '/Applications/Finale Reader.app')
     '''
     us = UserSettings()
     try:
@@ -1492,150 +1370,97 @@ def get(key):
 
     This will create a user settings file if necessary:
 
-    ::
-
-        >>> from music21 import environment
-        >>> for x in sorted(environment.keys()):
-        ...     x
-        ...
-        'autoDownload'
-        'braillePath'
-        'debug'
-        'directoryScratch'
-        'graphicsPath'
-        'ipythonShowFormat'
-        'lilypondBackend'
-        'lilypondFormat'
-        'lilypondPath'
-        'lilypondVersion'
-        'localCorporaSettings'
-        'localCorpusPath'
-        'localCorpusSettings'
-        'manualCoreCorpusPath'
-        'midiPath'
-        'musescoreDirectPNGPath'
-        'musicxmlPath'
-        'pdfPath'
-        'showFormat'
-        'vectorPath'
-        'warnings'
-        'writeFormat'
-
-    ::
-
-        >>> #_DOCS_SHOW environment.get('musicxmlPath')
-        '/Applications/Finale Reader.app'
-
+    >>> #_DOCS_SHOW environment.get('musicxmlPath')
+    '/Applications/Finale Reader.app'
     '''
     us = UserSettings()
     return us[key]
 
 
-#------------------------------------------------------------------------------
 
+
+#------------------------------------------------------------------------------
 
 class Test(unittest.TestCase):
 
-    def setUp(self):
-        pass
+    def stringFromTree(self, settingsTree):
+        etIndent(settingsTree.getroot())
+        bio = six.BytesIO()
+        settingsTree.write(bio, encoding='utf-8', xml_declaration=True)
+        match = bio.getvalue().decode('utf-8')
+        return match
 
-    def runTest(self):
-        pass
-
-    def testTest(self):
-        self.assertEqual(1, 1)
-
-    def testSettings(self):
-
-        storage = Settings()
-        for i in range(10):
-            slot = Preference()
-            slot.set('name', 'name%s' % i)
-            slot.set('value', i)
-            storage.append(slot)
-        xstr = storage.xmlStr()
-        if 'encoding' in xstr:
-            enc = 'encoding="utf-8"'
-        else:
-            enc = ''
-        self.assertEqual("""<?xml version="1.0" """ + enc + """?>
-<settings>
-  <preference name="name0" value="0"/>
-  <preference name="name1" value="1"/>
-  <preference name="name2" value="2"/>
-  <preference name="name3" value="3"/>
-  <preference name="name4" value="4"/>
-  <preference name="name5" value="5"/>
-  <preference name="name6" value="6"/>
-  <preference name="name7" value="7"/>
-  <preference name="name8" value="8"/>
-  <preference name="name9" value="9"/>
-</settings>
-""", xstr)
 
     def testToSettings(self):
-
         env = Environment(forcePlatform='darwin')
-        match = _environStorage['instance']._toSettings(
-            _environStorage['instance']._ref).xmlStr()
+        settingsTree = envSingleton().toSettingsXML()
+        match = self.stringFromTree(settingsTree)
         self.maxDiff = None
         if 'encoding' in match:
-            enc = 'encoding="utf-8"'
+            enc = "encoding='utf-8'"
         else:
             enc = ''
-        canonic = """<?xml version="1.0" """ + enc + """?>
-<settings>
-  <preference name="autoDownload" value="ask"/>
-  <preference name="braillePath"/>
-  <preference name="debug" value="0"/>
-  <preference name="directoryScratch"/>
-  <preference name="graphicsPath" value="/Applications/Preview.app"/>
-  <preference name="ipythonShowFormat" value="ipython.vexflow"/>
-  <preference name="lilypondBackend" value="ps"/>
-  <preference name="lilypondFormat" value="pdf"/>
-  <preference name="lilypondPath" value="/Applications/Lilypond.app/Contents/Resources/bin/lilypond"/>
-  <preference name="lilypondVersion"/>
-  <localCorporaSettings/>
-  <localCorpusSettings/>
-  <preference name="manualCoreCorpusPath"/>
-  <preference name="midiPath" value="/Applications/QuickTime Player.app"/>
-  <preference name="musescoreDirectPNGPath" value="/Applications/MuseScore.app/Contents/MacOS/mscore"/>
-  <preference name="musicxmlPath" value="/Applications/Finale Notepad 2012.app"/>
-  <preference name="pdfPath" value="/Applications/Preview.app"/>
-  <preference name="showFormat" value="musicxml"/>
-  <preference name="vectorPath" value="/Applications/Preview.app"/>
-  <preference name="warnings" value="1"/>
-  <preference name="writeFormat" value="musicxml"/>
+        canonic = """<?xml version='1.0' """ + enc + """?>
+<settings encoding="utf-8">
+  <preference name="autoDownload" value="ask" />
+  <preference name="braillePath" />
+  <preference name="debug" value="0" />
+  <preference name="directoryScratch" />
+  <preference name="graphicsPath" value="/Applications/Preview.app" />
+  <preference name="ipythonShowFormat" value="ipython.musicxml.png" />
+  <preference name="lilypondBackend" value="ps" />
+  <preference name="lilypondFormat" value="pdf" />
+  <preference name="lilypondPath"
+      value="/Applications/Lilypond.app/Contents/Resources/bin/lilypond" />
+  <preference name="lilypondVersion" />
+  <localCorporaSettings />
+  <localCorpusSettings />
+  <preference name="manualCoreCorpusPath" />
+  <preference name="midiPath" value="/Applications/Utilities/QuickTime Player 7.app" />
+  <preference name="musescoreDirectPNGPath"
+      value="/Applications/MuseScore 2.app/Contents/MacOS/mscore" />
+  <preference name="musicxmlPath" value="/Applications/MuseScore 2.app/Contents/MacOS/mscore" />
+  <preference name="pdfPath" value="/Applications/Preview.app" />
+  <preference name="showFormat" value="musicxml" />
+  <preference name="vectorPath" value="/Applications/Preview.app" />
+  <preference name="warnings" value="1" />
+  <preference name="writeFormat" value="musicxml" />
 </settings>
 """
-        self.assertEqual(canonic.split('\n'), match.split('\n'))
+        self.assertTrue(common.whitespaceEqual(canonic, match))
 
         # try adding some local corpus settings
-        env['localCorpusSettings'] = ['a', 'b', 'c']
-        env['localCorporaSettings']['foo'] = ['bar', 'baz', 'quux']
-        match = _environStorage['instance']._toSettings(
-            _environStorage['instance']._ref).xmlStr()
+        env['localCorpusSettings'] = LocalCorpusSettings(['a', 'b', 'c'])
+        
+        lcFoo = LocalCorpusSettings(['bar', 'baz', 'quux'])
+        lcFoo.cacheFilePath = '/tmp/local.json'
+        lcFoo.name = 'foo'
+        env['localCorporaSettings']['foo'] = lcFoo
+        settingsTree = envSingleton().toSettingsXML()
+        match = self.stringFromTree(settingsTree)
         if 'encoding' in match:
-            enc = 'encoding="utf-8"'
+            enc = "encoding='utf-8'"
         else:
             enc = ''
-        canonic = """<?xml version="1.0" """ + enc + """?>
-<settings>
-  <preference name="autoDownload" value="ask"/>
-  <preference name="braillePath"/>
-  <preference name="debug" value="0"/>
-  <preference name="directoryScratch"/>
-  <preference name="graphicsPath" value="/Applications/Preview.app"/>
-  <preference name="ipythonShowFormat" value="ipython.vexflow"/>
-  <preference name="lilypondBackend" value="ps"/>
-  <preference name="lilypondFormat" value="pdf"/>
-  <preference name="lilypondPath" value="/Applications/Lilypond.app/Contents/Resources/bin/lilypond"/>
-  <preference name="lilypondVersion"/>
+        canonic = """<?xml version='1.0' """ + enc + """?>
+<settings encoding="utf-8">
+  <preference name="autoDownload" value="ask" />
+  <preference name="braillePath" />
+  <preference name="debug" value="0" />
+  <preference name="directoryScratch" />
+  <preference name="graphicsPath" value="/Applications/Preview.app" />
+  <preference name="ipythonShowFormat" value="ipython.musicxml.png" />
+  <preference name="lilypondBackend" value="ps" />
+  <preference name="lilypondFormat" value="pdf" />
+  <preference name="lilypondPath"
+      value="/Applications/Lilypond.app/Contents/Resources/bin/lilypond" />
+  <preference name="lilypondVersion" />
   <localCorporaSettings>
     <localCorpusSettings name="foo">
       <localCorpusPath>bar</localCorpusPath>
       <localCorpusPath>baz</localCorpusPath>
       <localCorpusPath>quux</localCorpusPath>
+      <cacheFilePath>/tmp/local.json</cacheFilePath>
     </localCorpusSettings>
   </localCorporaSettings>
   <localCorpusSettings>
@@ -1643,18 +1468,19 @@ class Test(unittest.TestCase):
     <localCorpusPath>b</localCorpusPath>
     <localCorpusPath>c</localCorpusPath>
   </localCorpusSettings>
-  <preference name="manualCoreCorpusPath"/>
-  <preference name="midiPath" value="/Applications/QuickTime Player.app"/>
-  <preference name="musescoreDirectPNGPath" value="/Applications/MuseScore.app/Contents/MacOS/mscore"/>
-  <preference name="musicxmlPath" value="/Applications/Finale Notepad 2012.app"/>
-  <preference name="pdfPath" value="/Applications/Preview.app"/>
-  <preference name="showFormat" value="musicxml"/>
-  <preference name="vectorPath" value="/Applications/Preview.app"/>
-  <preference name="warnings" value="1"/>
-  <preference name="writeFormat" value="musicxml"/>
+  <preference name="manualCoreCorpusPath" />
+  <preference name="midiPath" value="/Applications/Utilities/QuickTime Player 7.app" />
+  <preference name="musescoreDirectPNGPath"
+      value="/Applications/MuseScore 2.app/Contents/MacOS/mscore" />
+  <preference name="musicxmlPath" value="/Applications/MuseScore 2.app/Contents/MacOS/mscore" />
+  <preference name="pdfPath" value="/Applications/Preview.app" />
+  <preference name="showFormat" value="musicxml" />
+  <preference name="vectorPath" value="/Applications/Preview.app" />
+  <preference name="warnings" value="1" />
+  <preference name="writeFormat" value="musicxml" />
 </settings>
 """
-        self.assertEqual(canonic.split('\n'), match.split('\n'))
+        self.assertTrue(common.whitespaceEqual(canonic, match))
 
     def testFromSettings(self):
 
@@ -1662,66 +1488,67 @@ class Test(unittest.TestCase):
 
         # use a fake ref dict to get settings
         ref = {}
-        ref['localCorpusSettings'] = ['x', 'y', 'z']
+        ref['localCorpusSettings'] = LocalCorpusSettings(['x', 'y', 'z'])
         ref['midiPath'] = 'w'
-        settings = _environStorage['instance']._toSettings(ref)
+        settings = envSingleton().toSettingsXML(ref)
 
         # this will load values into the env._ref dictionary
-        _environStorage['instance']._fromSettings(settings,
-            _environStorage['instance']._ref)
+        envSingleton()._fromSettings(settings,
+            envSingleton()._ref)
         # get xml strings
-        match = _environStorage['instance']._toSettings(
-            _environStorage['instance']._ref).xmlStr()
+        match = self.stringFromTree(envSingleton().toSettingsXML())
         if 'encoding' in match:
-            enc = 'encoding="utf-8"'
+            enc = "encoding='utf-8'"
         else:
             enc = ''
-        canonic = """<?xml version="1.0" """ + enc + """?>
-<settings>
-  <preference name="autoDownload" value="ask"/>
-  <preference name="braillePath"/>
-  <preference name="debug" value="0"/>
-  <preference name="directoryScratch"/>
-  <preference name="graphicsPath" value="/Applications/Preview.app"/>
-  <preference name="ipythonShowFormat" value="ipython.vexflow"/>
-  <preference name="lilypondBackend" value="ps"/>
-  <preference name="lilypondFormat" value="pdf"/>
-  <preference name="lilypondPath" value="/Applications/Lilypond.app/Contents/Resources/bin/lilypond"/>
-  <preference name="lilypondVersion"/>
-  <localCorporaSettings/>
+        canonic = """<?xml version='1.0' """ + enc + """?>
+<settings encoding="utf-8">
+  <preference name="autoDownload" value="ask" />
+  <preference name="braillePath" />
+  <preference name="debug" value="0" />
+  <preference name="directoryScratch" />
+  <preference name="graphicsPath" value="/Applications/Preview.app" />
+  <preference name="ipythonShowFormat" value="ipython.musicxml.png" />
+  <preference name="lilypondBackend" value="ps" />
+  <preference name="lilypondFormat" value="pdf" />
+  <preference name="lilypondPath"
+      value="/Applications/Lilypond.app/Contents/Resources/bin/lilypond" />
+  <preference name="lilypondVersion" />
+  <localCorporaSettings />
   <localCorpusSettings>
     <localCorpusPath>x</localCorpusPath>
     <localCorpusPath>y</localCorpusPath>
     <localCorpusPath>z</localCorpusPath>
   </localCorpusSettings>
-  <preference name="manualCoreCorpusPath"/>
-  <preference name="midiPath" value="w"/>
-  <preference name="musescoreDirectPNGPath" value="/Applications/MuseScore.app/Contents/MacOS/mscore"/>
-  <preference name="musicxmlPath" value="/Applications/Finale Notepad 2012.app"/>
-  <preference name="pdfPath" value="/Applications/Preview.app"/>
-  <preference name="showFormat" value="musicxml"/>
-  <preference name="vectorPath" value="/Applications/Preview.app"/>
-  <preference name="warnings" value="1"/>
-  <preference name="writeFormat" value="musicxml"/>
+  <preference name="manualCoreCorpusPath" />
+  <preference name="midiPath" value="w" />
+  <preference name="musescoreDirectPNGPath"
+      value="/Applications/MuseScore 2.app/Contents/MacOS/mscore" />
+  <preference name="musicxmlPath" value="/Applications/MuseScore 2.app/Contents/MacOS/mscore" />
+  <preference name="pdfPath" value="/Applications/Preview.app" />
+  <preference name="showFormat" value="musicxml" />
+  <preference name="vectorPath" value="/Applications/Preview.app" />
+  <preference name="warnings" value="1" />
+  <preference name="writeFormat" value="musicxml" />
 </settings>
 """
-        self.assertEqual(canonic.split(), match.split())
+        self.assertTrue(common.whitespaceEqual(canonic, match))
 
     def testEnvironmentA(self):
         env = Environment(forcePlatform='darwin')
 
         # setting the local corpus path pref is like adding a path
-        env['localCorpusPath'] = 'a'
-        self.assertEqual(env['localCorpusSettings'], ['a'])
+        env['localCorpusPath'] = '/a'
+        self.assertEqual(list(env['localCorpusSettings']), ['/a'])
 
-        env['localCorpusPath'] = 'b'
-        self.assertEqual(env['localCorpusSettings'], ['a', 'b'])
+        env['localCorpusPath'] = '/b'
+        self.assertEqual(list(env['localCorpusSettings']), ['/a', '/b'])
 
 
 #------------------------------------------------------------------------------
 
 
-_DOC_ORDER = [UserSettings, Environment, Preference]
+_DOC_ORDER = [UserSettings, Environment, LocalCorpusSettings]
 
 if __name__ == "__main__":
     import music21

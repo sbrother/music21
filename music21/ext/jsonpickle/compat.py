@@ -1,9 +1,12 @@
+# -*- coding: utf-8 -*-
+
 import sys
 
-# True if we are running on Python 3.
-PY3 = sys.version_info[0] == 3
-PY32 = PY3 and sys.version_info[1] == 2
-PY2 = not PY3
+PY_MAJOR = sys.version_info[0]
+PY_MINOR = sys.version_info[1]
+PY2 = PY_MAJOR == 2
+PY3 = PY_MAJOR == 3
+PY32 = PY3 and PY_MINOR == 2
 
 try:
     bytes = bytes
@@ -23,10 +26,23 @@ except NameError:
 
 try:
     long = long
+    numeric_types = (int, long)
 except NameError:
     long = int
+    numeric_types = (int,)
 
 try:
     unichr = unichr
 except NameError:
     unichr = chr
+
+
+try:
+    # Python3
+    import queue
+except ImportError:
+    # Python2
+    import Queue as queue
+
+
+__all__ = ['bytes', 'set', 'unicode', 'long', 'unichr', 'queue']

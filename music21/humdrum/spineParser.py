@@ -13,61 +13,65 @@ music21.humdrum.spineParser is a collection of utilities for changing
 native humdrum code into music21 streams.  Most music21 users will
 simply want to call:
 
-
-
 >>> #_DOCS_SHOW myFile = converter.parse('myfile.krn')
 >>> #_DOCS_SHOW myFile.show()
-
 
 The methods in here are documented for developers wishing to expand
 music21's ability to parse humdrum.
 
 SpineParsing consists of several steps.
 
-* The data file is read in and all events are sliced horizontally (EventCollections) and vertically (Protospines)
-* Protospines are parsed into HumdrumSpines by following Spine Path Indicators (:samp:`*^` and :samp:`*v` especially)
+* The data file is read in and all events are sliced horizontally (EventCollections)
+    and vertically (Protospines)
+* Protospines are parsed into HumdrumSpines by following Spine Path Indicators
+    (:samp:`*^` and :samp:`*v` especially)
     Protospines that separate become new Protospines with their parentSpine indicated.  Protospines
     that merge again then followed by the same Protospine as before.  This will cause problems if
-    a voice remerges with another staff, but in practice I have not seen a .krn file that does this and
+    a voice remerges with another staff, but in practice I have not
+    seen a .krn file that does this and
     should be avoided in any case.
-* HumdrumSpines are reclassed according to their exclusive definition.  :samp:`**kern` becomes KernSpines, etc.
+* HumdrumSpines are reclassed according to their exclusive definition.
+    :samp:`**kern` becomes KernSpines, etc.
 * All reclassed HumdrumSpines are filled with music21 objects in their .stream property.
     Measures are put into the spine but are empty containers.  The resulting
     HumdrumSpine.stream objects
     look like Stream.semiFlat versions in many ways.
-* For HumdrumSpines with parent spines their .stream contents are then inserted into their parent spines with
+* For HumdrumSpines with parent spines their .stream contents are then
+    inserted into their parent spines with
     voice tagged as a music21 Group property.
 * Lyrics and Dynamics are placed into their corresponding HumdrumSpine.stream objects
 * Stream elements are moved into their measures within a Stream
 * Measures are searched for elements with voice groups and Voice objects are created
-
 '''
+# pylint: disable=redefined-builtin
 #python3
-try:
-    basestring
-except:
-    basestring = str # @ReservedAssignment
-
-import unittest
+import copy
 import math
+import os
 import re
+import unittest
+
+from music21.ext import six
+
 from music21 import articulations
-from music21 import chord
-from music21 import dynamics
-from music21 import base
-from music21 import duration
 from music21 import bar
+from music21 import base
+from music21 import chord
+from music21 import clef
+from music21 import common
+from music21 import dynamics
+from music21 import duration
+from music21 import exceptions21
+from music21 import expressions
 from music21 import key
 from music21 import note
-from music21 import expressions
+from music21 import meter
+from music21 import metadata
+from music21 import stream
 from music21 import tempo
 from music21 import tie
-from music21 import meter
-from music21 import clef
-from music21 import stream
-from music21 import common
-from music21 import exceptions21
-from music21.humdrum import testFiles #, canonicalOutput
+
+from music21.humdrum import testFiles
 from music21.humdrum import instruments
 
 from music21 import environment
@@ -76,13 +80,17 @@ environLocal = environment.Environment(_MOD)
 
 flavors = {'JRP': False}
 
-import os
-
 spinePathIndicators = ["*+", "*-", "*^", "*v", "*x", "*"]
+
+class HumdrumException(exceptions21.Music21Exception):
+    '''
+    General Exception class for problems relating to Humdrum
+    '''
+    pass
 
 
 class HumdrumDataCollection(object):
-    '''
+    r'''
     A HumdrumDataCollection takes in a mandatory list where each element
     is a line of humdrum data.  Together this list represents a collection
     of spines.  Essentially it's the contents of a humdrum file.
@@ -119,25 +127,29 @@ class HumdrumDataCollection(object):
         interpretations in a protospine may be necessary.
 
     (2) Split spines are assumed to be voices in a single spine staff.
-
-
     '''
-    parsedLines = False
+    def __init__(self, dataStream=None):
+        # attributes
+        self.eventList = None
+        self.maxSpines = None
+        self.parsePositionInStream = None
+        self.fileLength = None
+        self.protoSpines = None
+        self.eventCollections = None
+        self.spineCollection = None
 
-    def __init__(self, dataStream = [], parseLines = True):
-        if dataStream is []:
-            raise HumdrumException("dataStream is not optional, specify some lines")
-        elif isinstance(dataStream, basestring):
+        if dataStream is not None and not dataStream:
+            raise HumdrumException("dataStream is not optional, specify some lines: \n" +
+                                   "DataStream was: " + repr(dataStream))
+        elif dataStream is None:
+            dataStream = []
+        elif isinstance(dataStream, six.string_types):
             dataStream = dataStream.splitlines()
-        self.dataStream = dataStream
-        self._storedStream = None
-        if parseLines is True:
-            try:
-                self.parseLines(self.dataStream)
-            except IOError:
-                raise
 
-    def parseLines(self, dataStream = None):
+        self.dataStream = dataStream
+        self.stream = None
+
+    def parse(self):
         '''
         Parse a list (dataStream) of lines into a HumdrumSpineCollection
         (which contains HumdrumSpines)
@@ -148,18 +160,23 @@ class HumdrumDataCollection(object):
         return an exception.
 
         '''
+        dataStream = self.dataStream
         if dataStream is None:
-            dataStream = self.dataStream
-            if dataStream is None:
-                raise HumdrumException('Need a list of lines (dataStream) to parse!')
+            raise HumdrumException('Need a list of lines (dataStream) to parse!')
 
         hasOpus, dataCollections = self.determineIfDataStreamIsOpus(dataStream)
         if hasOpus is True: # Palestrina data collection, maybe others
-            self.parseOpusDataCollections(dataCollections)
-            return
+            return self.parseOpusDataCollections(dataCollections)
+        else:
+            return self.parseNonOpus(dataStream)
 
 
-
+    def parseNonOpus(self, dataStream):
+        '''
+        The main parse function for non-opus data collections.
+        '''
+        self.stream = stream.Score()
+        
         self.maxSpines = 0
 
         # parse global comments and figure out the maximum number of spines we will have
@@ -173,10 +190,16 @@ class HumdrumDataCollection(object):
         self.parseProtoSpinesAndEventCollections()
         self.spineCollection = self.createHumdrumSpines()
         self.spineCollection.createMusic21Streams()
-        self.parsedLines = True
         self.insertGlobalEvents()
+        for thisSpine in self.spineCollection:
+            thisSpine.stream.id = "spine_" + str(thisSpine.id)
+        for thisSpine in self.spineCollection:
+            if thisSpine.parentSpine is None and thisSpine.spineType == 'kern':
+                self.stream.insert(thisSpine.stream)
+        
+        self.parseMetadata()
 
-    def determineIfDataStreamIsOpus(self, dataStream = None):
+    def determineIfDataStreamIsOpus(self, dataStream=None):
         r'''
         Some Humdrum files contain multiple pieces in one file
         which are better represented as :class:`~music21.stream.Opus`
@@ -190,7 +213,7 @@ class HumdrumDataCollection(object):
         >>> from pprint import pprint as pp
 
         >>> mps = humdrum.testFiles.multipartSanctus
-        >>> hdc = humdrum.spineParser.HumdrumDataCollection(mps, parseLines = False)
+        >>> hdc = humdrum.spineParser.HumdrumDataCollection(mps)
         >>> (hasOpus, dataCollections) = hdc.determineIfDataStreamIsOpus()
         >>> hasOpus
         True
@@ -241,9 +264,9 @@ class HumdrumDataCollection(object):
         endPositions = []
         for i, line in enumerate(dataStream):
             l = line.rstrip()
-            if re.search('^(\*\-\t)*\*\-$', l):
+            if re.search(r'^(\*\-\t)*\*\-$', l):
                 endPositions.append(i)
-            elif re.search('^(\*\*\w+\t)*\*\*\w+$', l):
+            elif re.search(r'^(\*\*\w+\t)*\*\*\w+$', l):
                 startPositions.append(i)
         if len(startPositions) < 2:
             return (False, None)
@@ -258,17 +281,23 @@ class HumdrumDataCollection(object):
         for i in range(len(endPositions)):
             if i == 0:
                 endPos = endPositions[i]
-                dataCollections.append(dataStream[:endPos+1])
+                dataCollections.append(dataStream[:endPos + 1])
             elif i == len(endPositions) -1:
                 # ignore endPosition and grab to end of file
-                startPos = endPositions[i-1] + 1
+                startPos = endPositions[i - 1] + 1
                 dataCollections.append(dataStream[startPos:])
             else:
                 # ignore startPositions, grab comments etc. between scores
-                startPos = endPositions[i-1] + 1
+                startPos = endPositions[i - 1] + 1
                 endPos = endPositions[i] + 1
                 dataCollections.append(dataStream[startPos:endPos])
-        return (True, dataCollections)
+
+        if len(dataCollections) > 1:
+            return (True, dataCollections)
+        else:
+            raise HumdrumException("Malformed humdrum data: " +
+                "possibly multiple **tags without closing information. Or a *tandem tag " +
+                "accidentally encoded as a **spine tag.")
 
     def parseOpusDataCollections(self, dataCollections):
         '''
@@ -277,7 +306,7 @@ class HumdrumDataCollection(object):
 
 
         >>> mps = humdrum.testFiles.multipartSanctus
-        >>> hdc = humdrum.spineParser.HumdrumDataCollection(mps, parseLines = False)
+        >>> hdc = humdrum.spineParser.HumdrumDataCollection(mps)
         >>> (hasOpus, dataCollections) = hdc.determineIfDataStreamIsOpus()
         >>> if hasOpus is True:
         ...     op = hdc.parseOpusDataCollections(dataCollections)
@@ -292,14 +321,20 @@ class HumdrumDataCollection(object):
         opus = stream.Opus()
         for i, dc in enumerate(dataCollections):
             hdc = HumdrumDataCollection(dc)
+            hdc.parse()
             sc = hdc.stream
             sc.id = 'section_' + str(i + 1)
+            sc.metadata.number = i + 1
             opus.append(sc)
 
-        self._storedStream = opus
+        if dataCollections:
+            opus.metadata = copy.deepcopy(opus.scores[0].metadata)
+            opus.metadata.number = 0
+
+        self.stream = opus
         return opus
 
-    def parseEventListFromDataStream(self, dataStream = None):
+    def parseEventListFromDataStream(self, dataStream=None):
         r'''
         Sets self.eventList from a dataStream (that is, a
         list of lines).  It sets self.maxSpines to the
@@ -320,12 +355,13 @@ class HumdrumDataCollection(object):
         Returns eventList in addition to setting it as self.eventList.
 
 
-        >>> eventString = "!!! COM: Beethoven, Ludwig van\n" + \
-        ...               "!! Not really a piece by Beethoven\n" + \
-        ...               "**kern\t**dynam\n" + \
-        ...               "C4\tpp\n" + \
-        ...               "D8\t.\n"
+        >>> eventString = ("!!! COM: Beethoven, Ludwig van\n" +
+        ...                "!! Not really a piece by Beethoven\n" +
+        ...                "**kern\t**dynam\n" +
+        ...                "C4\tpp\n" +
+        ...                "D8\t.\n")
         >>> hdc = humdrum.spineParser.HumdrumDataCollection(eventString)
+        >>> hdc.maxSpines = 2
         >>> eList = hdc.parseEventListFromDataStream()
         >>> eList is hdc.eventList
         True
@@ -353,9 +389,9 @@ class HumdrumDataCollection(object):
             line = line.rstrip()
             if line == "":
                 continue # technically forbidden by Humdrum but the source of so many errors!
-            elif re.match('\!\!\!', line):
+            elif re.match(r'\!\!\!', line):
                 self.eventList.append(GlobalReferenceLine(self.parsePositionInStream, line))
-            elif re.match('\!\!', line): ## find global comments at the top of the line
+            elif re.match(r'\!\!', line): ## find global comments at the top of the line
                 self.eventList.append(GlobalCommentLine(self.parsePositionInStream, line))
             else:
                 thisLine = SpineLine(self.parsePositionInStream, line)
@@ -368,7 +404,8 @@ class HumdrumDataCollection(object):
 
     def parseProtoSpinesAndEventCollections(self):
         r'''
-        Run after :meth:`~music21.humdrum.spineParser.HumdrumDataCollection.parseEventListFromDataStream()`
+        Run after
+        :meth:`~music21.humdrum.spineParser.HumdrumDataCollection.parseEventListFromDataStream()`
         to take self.eventList and slice it horizontally
         to get self.eventCollections, which is a list of
         EventCollection objects, or things that happen simultaneously.
@@ -397,12 +434,14 @@ class HumdrumDataCollection(object):
         setting it in the calling object.
 
 
-        >>> eventString = "!!!COM: Beethoven, Ludwig van\n" + \
-        ...               "!! Not really a piece by Beethoven\n" + \
-        ...               "**kern\t**dynam\n" + \
-        ...               "C4\tpp\n" + \
-        ...               "D8\t.\n"
+        >>> eventString = ("!!!COM: Beethoven, Ludwig van\n" +
+        ...                "!! Not really a piece by Beethoven\n" +
+        ...                "**kern\t**dynam\n" +
+        ...                "C4\tpp\n" +
+        ...                "D8\t.\n")
         >>> hdc = humdrum.spineParser.HumdrumDataCollection(eventString)
+        >>> hdc.maxSpines = 2
+        >>> hdc.fileLength = 5
         >>> protoSpines, eventCollections = hdc.parseProtoSpinesAndEventCollections()
         >>> protoSpines is hdc.protoSpines
         True
@@ -429,58 +468,63 @@ class HumdrumDataCollection(object):
         >>> eventCollections[4].getAllOccurring()
         [<music21.humdrum.spineParser.SpineEvent D8>, <music21.humdrum.spineParser.SpineEvent pp>]
         '''
-        if self.eventList == []:
+        if not self.eventList:
             self.parseEventListFromDataStream()
 
         ## we make two lists: one of ProtoSpines (vertical slices) and
         ##    one of Events(horizontal slices)
         returnProtoSpines = []
         returnEventCollections = []
+        protoSpineEventList = []
 
-        for j in range(0, self.maxSpines):
-            protoSpineEventList = []
+        def doOneCell(i, j):
+            # get the currentEventCollection
+            thisEventCollection = returnEventCollections[i]
 
-            for i in range(0, self.fileLength):
-                # get the currentEventCollection
-                if j == 0:
-                    thisEventCollection = EventCollection(self.maxSpines)
-                    returnEventCollections.append(thisEventCollection)
-                else:
-                    thisEventCollection = returnEventCollections[i]
+            # parse this cell
+            if self.eventList[i].isSpineLine is True:
+                # not a global event
+                if len(self.eventList[i].spineData) > j:
+                    ## are there actually this many spines at this point?
+                    ## thus, is there an event here? True
+                    thisEvent = SpineEvent(self.eventList[i].spineData[j])
+                    thisEvent.position = i
+                    thisEvent.protoSpineId = j
+                    if thisEvent.contents in spinePathIndicators:
+                        thisEventCollection.spinePathData = True
 
-                # parse this cell
-                if self.eventList[i].isSpineLine is True:
-                    # not a global event
-                    if len(self.eventList[i].spineData) > j:
-                        ## are there actually this many spines at this point?
-                        ## thus, is there an event here? True
-                        thisEvent = SpineEvent(self.eventList[i].spineData[j])
-                        thisEvent.position = i
-                        thisEvent.protoSpineId = j
-                        if thisEvent.contents in spinePathIndicators:
-                            thisEventCollection.spinePathData = True
-
-                        protoSpineEventList.append(thisEvent)
-                        thisEventCollection.addSpineEvent(j, thisEvent)
-                        if thisEvent.contents == '.' and i > 0:
-                            lastEvent = returnEventCollections[i-1].events[j]
-                            if lastEvent is not None:
-                                thisEventCollection.addLastSpineEvent(j, returnEventCollections[i-1].getSpineOccurring(j))
-                    else:  ## no data here
-                        thisEvent = SpineEvent(None)
-                        thisEvent.position = i
-                        thisEvent.protoSpineId = j
-                        thisEventCollection.addSpineEvent(j, thisEvent)
-
-                        protoSpineEventList.append(None)
-                else:  ## Global event -- either GlobalCommentLine or GlobalReferenceLine
-                    if j == 0: ## adds to all spines but just runs the first time.
-                        thisEventCollection.addGlobalEvent(self.eventList[i])
+                    protoSpineEventList.append(thisEvent)
+                    thisEventCollection.addSpineEvent(j, thisEvent)
+                    if thisEvent.contents == '.' and i > 0:
+                        lastEvent = returnEventCollections[i - 1].events[j]
+                        if lastEvent is not None:
+                            thisEventCollection.addLastSpineEvent(j,
+                                returnEventCollections[i - 1].getSpineOccurring(j))
+                else:  ## no data here
                     thisEvent = SpineEvent(None)
                     thisEvent.position = i
                     thisEvent.protoSpineId = j
                     thisEventCollection.addSpineEvent(j, thisEvent)
+
                     protoSpineEventList.append(None)
+            else:  ## Global event -- either GlobalCommentLine or GlobalReferenceLine
+                if j == 0: ## adds to all spines but just runs the first time.
+                    thisEventCollection.addGlobalEvent(self.eventList[i])
+                thisEvent = SpineEvent(None)
+                thisEvent.position = i
+                thisEvent.protoSpineId = j
+                thisEventCollection.addSpineEvent(j, thisEvent)
+                protoSpineEventList.append(None)
+
+        # end doOneCell
+        for j in range(self.maxSpines):
+            protoSpineEventList = []
+
+            for i in range(self.fileLength):
+                if j == 0:
+                    returnEventCollections.append(EventCollection(self.maxSpines))
+
+                doOneCell(i, j)
 
             returnProtoSpines.append(ProtoSpine(protoSpineEventList))
 
@@ -489,7 +533,7 @@ class HumdrumDataCollection(object):
 
         return (returnProtoSpines, returnEventCollections)
 
-    def createHumdrumSpines(self, protoSpines = None, eventCollections = None):
+    def createHumdrumSpines(self, protoSpines=None, eventCollections=None):
         '''
         Takes the data from the object's protoSpines and eventCollections
         and returns a :class:`~music21.humdrum.spineParser.SpineCollection`
@@ -511,9 +555,7 @@ class HumdrumDataCollection(object):
             *x    exchange the position of two spines
             *     do nothing
         '''
-
-
-        if protoSpines == None or eventCollections == None:
+        if protoSpines is None or eventCollections is None:
             protoSpines = self.protoSpines
             eventCollections = self.eventCollections
         maxSpines = len(protoSpines)
@@ -524,98 +566,108 @@ class HumdrumDataCollection(object):
         spineCollection = SpineCollection()
 
         # go through the event collections line by line
-        for i in range(0, self.fileLength):
+        for i in range(self.fileLength):
             thisEventCollection = eventCollections[i]
-            for j in range(0, maxSpines):
+            for j in range(maxSpines):
                 thisEvent = protoSpines[j].eventList[i]
 
-                if thisEvent is not None:  # something there                
-                    currentSpine = currentSpineList[j]
-                    if currentSpine is None:
-                        ## first event after a None = new spine because
-                        ## Humdrum does not require *+ at the beginning
-                        currentSpine = spineCollection.addSpine()
-                        currentSpine.insertPoint = i
-                        currentSpineList[j] = currentSpine
+                if thisEvent is None:  # nothing there
+                    continue
 
-                    currentSpine.append(thisEvent)
-                    # currentSpine.id is always unique in a spineCollection
-                    thisEvent.protoSpineId = currentSpine.id
+                currentSpine = currentSpineList[j]
+                if currentSpine is None:
+                    ## first event after a None = new spine because
+                    ## Humdrum does not require *+ at the beginning
+                    currentSpine = spineCollection.addSpine()
+                    currentSpine.insertPoint = i
+                    currentSpineList[j] = currentSpine
+
+                currentSpine.append(thisEvent)
+                # currentSpine.id is always unique in a spineCollection
+                thisEvent.protoSpineId = currentSpine.id
 
             # check for spinePathData
+            if thisEventCollection.spinePathData is False:
+                continue
+
             # note that nothing else can happen in an eventCollection
             # except spine path data if any spine has spine path data.
             # thus, this is illegal.  The C#4 will be ignored:
             # *x     *x     C#4
-            if thisEventCollection.spinePathData is True:
-                newSpineList = common.defaultlist(lambda:None)
-                mergerActive = False
-                exchangeActive = False
-                for j in range(0, maxSpines):
-                    thisEvent = protoSpines[j].eventList[i]
-                    currentSpine = currentSpineList[j]
-                    
-                    if thisEvent is None and currentSpine is not None:
-                        ## should this happen?
-                        newSpineList.append(currentSpine)
-                    elif thisEvent is None:
-                        continue
-                    elif thisEvent.contents == "*-":  ## terminate spine
+
+            newSpineList = common.defaultlist(lambda:None)
+            mergerActive = False
+            exchangeActive = False
+            for j in range(maxSpines):
+                thisEvent = protoSpines[j].eventList[i]
+                currentSpine = currentSpineList[j]
+
+                if thisEvent is None and currentSpine is not None:
+                    ## should this happen?
+                    newSpineList.append(currentSpine)
+                elif thisEvent is None:
+                    continue
+                elif thisEvent.contents == "*-":  ## terminate spine
+                    currentSpine.endingPosition = i
+                elif thisEvent.contents == "*^":  ## split spine assume they are voices
+                    newSpine1 = spineCollection.addSpine(streamClass=stream.Voice)
+                    newSpine1.insertPoint = i + 1
+                    newSpine1.parentSpine = currentSpine
+                    newSpine1.isFirstVoice = True
+                    newSpine2 = spineCollection.addSpine(streamClass=stream.Voice)
+                    newSpine2.insertPoint = i + 1
+                    newSpine2.parentSpine = currentSpine
+                    currentSpine.endingPosition = i # will be overridden if merged
+                    currentSpine.childSpines.append(newSpine1)
+                    currentSpine.childSpines.append(newSpine2)
+
+                    currentSpine.childSpineInsertPoints[i] = (newSpine1, newSpine2)
+                    newSpineList.append(newSpine1)
+                    newSpineList.append(newSpine2)
+                elif thisEvent.contents == "*v":  #merge spine -- n.b. we allow non-adjacent
+                                                    #    lines to be merged. this is incorrect
+                    if mergerActive is False:       #    per humdrum syntax, but is easily done.
+                        # assume that previous spine continues
+                        if currentSpine.parentSpine is not None:
+                            mergerActive = currentSpine.parentSpine
+                        else:
+                            mergerActive = True
                         currentSpine.endingPosition = i
-                    elif thisEvent.contents == "*^":  ## split spine assume they are voices
-                        newSpine1 = spineCollection.addSpine(streamClass = stream.Voice)
-                        newSpine1.insertPoint = i+1
-                        newSpine1.parentSpine = currentSpine
-                        newSpine1.isFirstVoice = True
-                        newSpine2 = spineCollection.addSpine(streamClass = stream.Voice)
-                        newSpine2.insertPoint = i+1
-                        newSpine2.parentSpine = currentSpine
-                        currentSpine.endingPosition = i # will be overridden if merged
-                        currentSpine.childSpines.append(newSpine1)
-                        currentSpine.childSpines.append(newSpine2)
+                    else:   ## if second merger code is not found then
+                            ## a one-to-one spine "merge" occurs
+                        currentSpine.endingPosition = i
+                        # merge back to parent if possible:
+                        if currentSpine.parentSpine is not None:
+                            newSpineList.append(currentSpine.parentSpine)
+                        # or merge back to other spine's parent:
+                        elif mergerActive is not True: # other spine parent set
+                            newSpineList.append(mergerActive)
+                        # or make a new spine...
+                        else:
+                            s = spineCollection.addSpine(streamClass=stream.Part)
+                            s.insertPoint = i
+                            newSpineList.append(s)
 
-                        currentSpine.childSpineInsertPoints[i] = (newSpine1, newSpine2)
-                        newSpineList.append(newSpine1)
-                        newSpineList.append(newSpine2)
-                    elif thisEvent.contents == "*v":  #merge spine -- n.b. we allow non-adjacent lines to be merged. this is incorrect
-                        if mergerActive is False:     #               per humdrum syntax, but is easily done.
-                            # assume that previous spine continues
-                            if currentSpine.parentSpine is not None:
-                                mergerActive = currentSpine.parentSpine
-                            else:
-                                mergerActive = True
-                            currentSpine.endingPosition = i
-                        else:  ## if second merger code is not found then a one-to-one spine "merge" occurs
-                            currentSpine.endingPosition = i
-                            # merge back to parent if possible:
-                            if currentSpine.parentSpine is not None:
-                                newSpineList.append(currentSpine.parentSpine)
-                            # or merge back to other spine's parent:
-                            elif mergerActive is not True: # other spine parent set
-                                newSpineList.append(mergerActive)
-                            # or make a new spine...
-                            else:
-                                s = spineCollection.addSpine(streamClass = stream.Part)
-                                s.insertPoint = i
-                                newSpineList.append(s)
+                        mergerActive = False
 
-                            mergerActive = False
-
-                    elif thisEvent.contents == "*x":  # exchange spine
-                        if exchangeActive is False:
-                            exchangeActive = currentSpine
-                        else:  ## if second exchange is not found, then both lines disappear and exception is raised
-                                ## n.b. we allow more than one PAIR of exchanges in a line so long as the first
-                                ## is totally finished by the time the second happens
-                            newSpineList.append(currentSpine)
-                            newSpineList.append(exchangeActive)
-                            exchangeActive = False;
-                    else:  ## null processing code "*"
+                elif thisEvent.contents == "*x":  # exchange spine
+                    if exchangeActive is False:
+                        exchangeActive = currentSpine
+                    else:   ## if second exchange is not found, then both
+                            ## lines disappear and exception is raised
+                            ## n.b. we allow more than one PAIR of exchanges
+                            ## in a line so long as the first
+                            ## is totally finished by the time the second happens
                         newSpineList.append(currentSpine)
+                        newSpineList.append(exchangeActive)
+                        exchangeActive = False
+                else:  ## null processing code "*"
+                    newSpineList.append(currentSpine)
 
-                if exchangeActive is not False:
-                    raise HumdrumException("ProtoSpine found with unpaired exchange instruction at line %d [%s]" % (i, thisEventCollection.events))
-                currentSpineList = newSpineList
+            if exchangeActive is not False:
+                raise HumdrumException("ProtoSpine found with unpaired exchange instruction " +
+                                       "at line %d [%s]" % (i, thisEventCollection.events))
+            currentSpineList = newSpineList
 
         return spineCollection
 
@@ -625,12 +677,10 @@ class HumdrumDataCollection(object):
         place in the outer Stream.
 
 
-        Run after self.spineCollection.createMusic21Streams().  Is run automatically by self.parseLines().
+        Run after self.spineCollection.createMusic21Streams().
+        Is run automatically by self.parse().
         uses self.spineCollection.getOffsetsAndPrioritiesByPosition()
         '''
-        if hasattr(self, 'globalEventsInserted') and self.globalEventsInserted is True:
-            return
-        self.globalEventsInserted = True
         positionDict = self.spineCollection.getOffsetsAndPrioritiesByPosition()
         eventList = self.eventList
         maxEventList = len(eventList)
@@ -643,14 +693,16 @@ class HumdrumDataCollection(object):
                 numberOfGlobalEventsInARow += 1
                 insertOffset = None
                 insertPriority = 0
-                for j in range(i+1, maxEventList):
+                for j in range(i + 1, maxEventList):
                     if j in positionDict:
                         insertOffset = positionDict[j][0]
                         # hopefully not more than 20 events in a row...
-                        insertPriority = positionDict[j][1][0].priority - 40 + numberOfGlobalEventsInARow
+                        insertPriority = (positionDict[j][1][0].priority 
+                                          - 40
+                                          + numberOfGlobalEventsInARow)
                         break
                 if event.isReference is True:
-                    # TODO: Fix GlobalReference
+                    # TODO: Fix GlobalReference -- ???
                     el = GlobalReference(event.code, event.value)
                 else:
                     el = GlobalComment(event.value)
@@ -665,61 +717,99 @@ class HumdrumDataCollection(object):
                 numberOfGlobalEventsInARow = 0
 
         for offset, el in insertList:
-            self.stream._insertCore(offset, el)
-        if len(insertList) > 0:
-            self.stream._elementsChanged()
+            self.stream.coreInsert(offset, el)
+            
+        if insertList:
+            self.stream.coreElementsChanged()
+        
         for el in appendList:
-            self.stream._appendCore(el)
-        if len(appendList) > 0:
-            self.stream._elementsChanged()
+            self.stream.coreAppend(el)
+        
+        if appendList:
+            self.stream.coreElementsChanged()
 
-    def _getStream(self):
-        if self._storedStream is not None:
-            return self._storedStream
-        if self.parsedLines is False:
-            self.parseLines()
+#     @property
+#     def stream(self):
+#         if self._storedStream is not None:
+#             return self._storedStream
+#         if self.parsedLines is False:
+#             self.parse()
+# 
+#         if self.spineCollection is None:
+#             raise HumdrumException("parsing got no spine collections!")
+#         elif self.spineCollection.spines is None:
+#             raise HumdrumException("not a single spine in your data... um, not my problem! " +
+#                                    "(well, maybe it is...file a bug report if you " +
+#                                    "have doubled checked your data)")
+#         elif self.spineCollection.spines[0].stream is None:
+#             raise HumdrumException("okay, you got at least one spine, but it aint got " +
+#                                    "a stream in it; (check your data or file a bug report)")
+#         else:
+#             masterStream = stream.Score()
+#             for thisSpine in self.spineCollection:
+#                 thisSpine.stream.id = "spine_" + str(thisSpine.id)
+#             for thisSpine in self.spineCollection:
+#                 if thisSpine.parentSpine is None and thisSpine.spineType == 'kern':
+#                     masterStream.insert(thisSpine.stream)
+#             self._storedStream = masterStream
+#             return masterStream
 
-        if self.spineCollection is None:
-            raise HumdrumException("parsing got no spine collections!")
-        elif self.spineCollection.spines is None:
-            raise HumdrumException("really? not a single spine in your data? um, not my problem! (well, maybe it is...file a bug report if you have doubled checked your data)")
-        elif self.spineCollection.spines[0].stream is None:
-            raise HumdrumException("okay, you got at least one spine, but it aint got a stream in it; have you thought of taking up kindergarten teaching? (just kidding, check your data or file a bug report)")
-        else:
-            masterStream = stream.Score()
-            for thisSpine in self.spineCollection:
-                thisSpine.stream.id = "spine_" + str(thisSpine.id)
-            for thisSpine in self.spineCollection:
-                if thisSpine.parentSpine is None and thisSpine.spineType == 'kern':
-                    masterStream.insert(thisSpine.stream)
-            self._storedStream = masterStream
-            return masterStream
+    def parseMetadata(self, s=None):
+        '''
+        Create a metadata object for the file.
+        '''
+        if s is None:
+            s = self.stream
+        md = metadata.Metadata()
+        s.metadata = md
+        grToRemove = []
 
-    stream = property(_getStream)
+        for gr in s.recurse().getElementsByClass('GlobalReference'):
+            wasParsed = gr.updateMetadata(md)
+            if wasParsed:
+                grToRemove.append(gr)
+
+        if grToRemove:
+            s.remove(grToRemove, recurse=True)
+
+
 
 class HumdrumFile(HumdrumDataCollection):
     '''
     A HumdrumFile is a HumdrumDataCollection which takes
     as a mandatory argument a filename to be opened and read.
     '''
-    def __init__(self, filename = None):
-        self.dataStream = None
-        self._storedStream = None
-        if (filename is not None):
-            try:
-                humFH = open(filename)
-                self.eventList = self.parseFH(humFH)
-            except IOError:
-                raise
+    def __init__(self, filename=None):
+        super(HumdrumFile, self).__init__()
+        self.filename = filename
 
-    def parseFH(self, fileHandle):
+    def parseFilename(self, filename=None):
+        if filename is None:
+            filename = self.filename
+        if filename is None:
+            raise HumdrumException('Cannot parse humdrum file without a filename!')
+        
+        try:
+            if six.PY3:
+                with open(filename, encoding="latin-1") as humFH:
+                    self.eventList = self.parseFileHandle(humFH)
+            else:
+                with open(filename) as humFH:
+                    self.eventList = self.parseFileHandle(humFH)
+
+        except IOError:
+            raise
+
+
+    def parseFileHandle(self, fileHandle):
         '''
-        parseFH takes a fileHandle and returns a HumdrumCollection
+        takes a fileHandle and returns a HumdrumCollection by calling parse() 
         '''
         spineDataCollection = []
         for line in fileHandle:
             spineDataCollection.append(line)
-        return self.parseLines(spineDataCollection)
+        self.dataStream = spineDataCollection
+        return self.parse()
 
 class HumdrumLine(object):
     '''
@@ -764,7 +854,7 @@ class SpineLine(HumdrumLine):
     isSpineLine = True
     numSpines = 0
 
-    def __init__(self, position = 0, contents = ""):
+    def __init__(self, position=0, contents=''):
         self.position = position
         contents = contents.rstrip()
         returnList = re.split("\t+", contents)
@@ -817,16 +907,18 @@ class GlobalReferenceLine(HumdrumLine):
     isSpineLine = False
     numSpines = 0
 
-    def __init__(self, position = 0, contents = "!!! NUL: None"):
+    def __init__(self, position=0, contents="!!! NUL: None"):
         self.position = position
-        noExclaim = re.sub('^\!\!\!+','',contents)
+        noExclaim = re.sub(r'^\!\!\!+', '', contents)
         try:
             (code, value) = noExclaim.split(":", 1)
             value = value.strip()
             if (code is None):
-                raise HumdrumException("GlobalReferenceLine (!!!) found without a code listed; this is probably a problem! %s " % contents)
+                raise HumdrumException("GlobalReferenceLine (!!!) found without a code " +
+                                       "listed; this is probably a problem! %s " % contents)
         except IndexError:
-            raise HumdrumException("GlobalReferenceLine (!!!) found without a code listed; this is probably a problem! %s " % contents)
+            raise HumdrumException("GlobalReferenceLine (!!!) found without a code listed; " +
+                                   "this is probably a problem! %s " % contents)
 
         self.contents = contents
         self.code = code
@@ -865,11 +957,11 @@ class GlobalCommentLine(HumdrumLine):
     isSpineLine = False
     numSpines = 0
 
-    def __init__(self, position = 0, contents = ""):
+    def __init__(self, position=0, contents=""):
         self.position = position
-        value = re.sub('^\!\!+\s?','',contents)
+        value = re.sub(r'^\!\!+\s?', '', contents)
         self.contents = contents
-        self.value    = value
+        self.value = value
 
 class ProtoSpine(object):
     '''
@@ -883,7 +975,7 @@ class ProtoSpine(object):
     See :meth:`~music21.humdrum.spineParser.parseProtoSpinesAndEventCollections`
     for more details on how ProtoSpine objects are created.
     '''
-    def __init__(self, eventList = None):
+    def __init__(self, eventList=None):
         if eventList is None:
             eventList = []
         self.eventList = eventList
@@ -892,7 +984,7 @@ class ProtoSpine(object):
 # Ready to be parsed...
 
 class HumdrumSpine(object):
-    '''
+    r'''
     A HumdrumSpine is a representation of a generic HumdrumSpine
     regardless of \*\*definition after spine path indicators have
     been simplified.
@@ -903,13 +995,13 @@ class HumdrumSpine(object):
 
 
     >>> SE = humdrum.spineParser.SpineEvent
-    >>> spineEvents = [SE('**kern'),SE('c,4'), SE('d#8')]
+    >>> spineEvents = [SE('**kern'), SE('c,4'), SE('d#8')]
     >>> spine1Id = 5
     >>> spine1 = humdrum.spineParser.HumdrumSpine(spine1Id, spineEvents)
     >>> spine1.insertPoint = 5
     >>> spine1.endingPosition = 6
     >>> spine1.parentSpine = 3  # spine 3 is the previous spine leading to this one
-    >>> spine1.childSpines = [7,8] # the spine ends by being split into spines 7 and 8
+    >>> spine1.childSpines = [7, 8] # the spine ends by being split into spines 7 and 8
 
     we keep weak references to the spineCollection so that we
     don't have circular references
@@ -935,12 +1027,11 @@ class HumdrumSpine(object):
     other than :class:`~music21.stream.Stream`, pass its classname in
     as the streamClass argument:
 
-    >>> spine2 = humdrum.spineParser.HumdrumSpine(
-    ...              streamClass = stream.Part)
+    >>> spine2 = humdrum.spineParser.HumdrumSpine(streamClass=stream.Part)
     >>> spine2.stream
     <music21.stream.Part ...>
     '''
-    def __init__(self, id=0, eventList = None, streamClass = stream.Stream): #@ReservedAssignment
+    def __init__(self, id=0, eventList=None, streamClass=stream.Stream): #@ReservedAssignment
         self.id = id
         if eventList is None:
             eventList = []
@@ -952,6 +1043,7 @@ class HumdrumSpine(object):
         self.insertPoint = 0
         self.endingPosition = 0
         self.parentSpine = None
+        self.newSpine = None
         self.isLastSpine = False
         self.childSpines = []
         self.childSpineInsertPoints = {}
@@ -962,6 +1054,9 @@ class HumdrumSpine(object):
 
         self._spineCollection = None
         self._spineType = None
+
+        self.isFirstVoice = None
+        self.iterIndex = None
 
 
     def __repr__(self):
@@ -1004,7 +1099,7 @@ class HumdrumSpine(object):
     def _getSpineCollection(self):
         return common.unwrapWeakref(self._spineCollection)
 
-    def _setSpineCollection(self, sc = None):
+    def _setSpineCollection(self, sc=None):
         self._spineCollection = common.wrapWeakref(sc)
 
     spineCollection = property(_getSpineCollection, _setSpineCollection)
@@ -1014,7 +1109,7 @@ class HumdrumSpine(object):
             return self._spineType
         else:
             for thisEvent in self.eventList:
-                m1 = re.match("\*\*(.*)", thisEvent.contents)
+                m1 = re.match(r"\*\*(.*)", thisEvent.contents)
                 if m1:
                     self._spineType = m1.group(1)
                     return self._spineType
@@ -1050,7 +1145,7 @@ class HumdrumSpine(object):
                     raise HumdrumException("Could not determine spineType " +
                                            "for spine with id " + str(self.id))
 
-    def _setSpineType(self, newSpineType = None):
+    def _setSpineType(self, newSpineType=None):
         self._spineType = newSpineType
 
     spineType = property(_getSpineType, _setSpineType)
@@ -1107,10 +1202,10 @@ class HumdrumSpine(object):
         hasMeasureOne = False
         for el in streamIn:
             if 'Stream' in el.classes:
-                if currentMeasureNumber != 0 or len(currentMeasure) > 0:
-                    currentMeasure._elementsChanged()
+                if currentMeasureNumber != 0 or currentMeasure:
+                    currentMeasure.coreElementsChanged()
                     #streamOut.append(currentMeasure)
-                    streamOut._appendCore(currentMeasure)
+                    streamOut.coreAppend(currentMeasure)
                 currentMeasure = el
                 currentMeasureNumber = el.number
                 currentMeasureOffset = el.offset
@@ -1119,21 +1214,21 @@ class HumdrumSpine(object):
             else:
                 if currentMeasureNumber != 0 or el.duration.quarterLength != 0:
                     #currentMeasure.insert(el.offset - currentMeasureOffset, el)
-                    currentMeasure._insertCore(el.offset - currentMeasureOffset, el)
+                    currentMeasure.coreInsert(el.offset - currentMeasureOffset, el)
                 else:
                     #streamOut.append(el)
-                    streamOut._appendCore(el)
+                    streamOut.coreAppend(el)
         # update the most recent measure and the surrounding stream, then append the last
-        currentMeasure._elementsChanged()
-        streamOut._elementsChanged()
-        if len(currentMeasure) > 0:
+        currentMeasure.coreElementsChanged()
+        streamOut.coreElementsChanged()
+        if currentMeasure:
             streamOut.append(currentMeasure)
 
         # move beginning stuff (Clefs, KeySig, etc.) to first measure...
         measureElements = streamOut.getElementsByClass('Measure')
-        if len(measureElements) > 0:
+        if measureElements:
             m1 = measureElements[0]
-            if hasMeasureOne == False: # pickup measure is not measure1
+            if not hasMeasureOne: # pickup measure is not measure1
                 m1.number = 1
             beginningStuff = streamOut.getElementsByOffset(0)
             for el in beginningStuff:
@@ -1147,7 +1242,8 @@ class HumdrumSpine(object):
             m1TimeSignature = m1.timeSignature
             if m1TimeSignature is not None:
                 if m1.duration.quarterLength < m1TimeSignature.barDuration.quarterLength:
-                    m1.paddingLeft = m1TimeSignature.barDuration.quarterLength - m1.duration.quarterLength
+                    m1.paddingLeft = (m1TimeSignature.barDuration.quarterLength -
+                                      m1.duration.quarterLength)
 
         return streamOut
 
@@ -1174,24 +1270,36 @@ class HumdrumSpine(object):
             elif eventC.startswith('!'):
                 thisObject = SpineComment(eventC)
             else:
+                # pylint: disable=attribute-defined-outside-init
                 thisObject = base.ElementWrapper(event)
                 thisObject.humdrumPosition = event.position
 
             if thisObject is not None:
-                self.stream._appendCore(thisObject)
-        self.stream._elementsChanged()
+                self.stream.coreAppend(thisObject)
+        self.stream.coreElementsChanged()
 
 class KernSpine(HumdrumSpine):
-    '''
+    r'''
     A KernSpine is a type of humdrum spine with the \*\*kern
     attribute set and thus events are processed as if they
     are kern notes
     '''
+    def __init__(self, id=0, eventList=None, streamClass=stream.Stream): #@ReservedAssignment
+        super(KernSpine, self).__init__(id, eventList, streamClass)
+        self.lastContainer = None
+        self.inTuplet = None
+        self.lastNote = None
+        self.currentBeamNumbers = 0
+        self.currentTupletDuration = 0.0
+        self.desiredTupletDuration = 0.0
+
     def parse(self):
-        lastContainer = hdStringToMeasure('=0')
-        inTuplet = False
-        lastNote = None
-        currentBeamNumbers = 0
+        self.lastContainer = hdStringToMeasure('=0')
+        self.inTuplet = False
+        self.lastNote = None
+        self.currentBeamNumbers = 0
+        self.currentTupletDuration = 0.0
+        self.desiredTupletDuration = 0.0
 
         for event in self.eventList:
             # event is a SpineEvent object
@@ -1206,110 +1314,119 @@ class KernSpine(HumdrumSpine):
                     if tempObject is not None:
                         thisObject = tempObject
                 elif eventC.startswith('='):
-                    lastContainer  = hdStringToMeasure(eventC, lastContainer)
-                    thisObject = lastContainer
+                    self.lastContainer  = hdStringToMeasure(eventC, self.lastContainer)
+                    thisObject = self.lastContainer
                 elif eventC.startswith('!'):
                     thisObject = SpineComment(eventC)
                     if thisObject.comment == "":
                         thisObject = None
                 elif eventC.count(' '):
-                    ### multipleNotes
-                    notesToProcess = eventC.split()
-                    chordNotes = []
-                    for noteToProcess in notesToProcess:
-                        thisNote = hdStringToNote(noteToProcess)
-                        chordNotes.append(thisNote)
-                    thisObject = chord.Chord(chordNotes, beams=chordNotes[-1].beams)
-                    thisObject.duration = chordNotes[0].duration
-
-                    if currentBeamNumbers != 0 and len(thisObject.beams.beamsList) == 0:
-                        for i in range(currentBeamNumbers):
-                            thisObject.beams.append('continue')
-                    elif len(thisObject.beams.beamsList) > 0:
-                        if thisObject.beams.beamsList[0].type == 'stop':
-                            currentBeamNumbers = 0
-                        else:
-                            for i in range(len(thisObject.beams.beamsList)):
-                                if thisObject.beams.beamsList[i].type != 'stop':
-                                    currentBeamNumbers += 1
-
-                    # nested tuplets not supported by humdrum...
-                    if inTuplet is False and len(thisObject.duration.tuplets) > 0:
-                        inTuplet = True
-                        desiredTupletDuration = thisObject.duration.tuplets[0].totalTupletLength()
-                        currentTupletDuration = thisObject.duration.quarterLength
-                        thisObject.duration.tuplets[0].type = 'start'
-                    elif inTuplet is True and len(thisObject.duration.tuplets) == 0:
-                        inTuplet = False
-                        desiredTupletDuration = 0.0
-                        currentTupletDuration = 0.0
-                        lastNote.duration.tuplets[0].type = 'stop'
-                    elif inTuplet is True:
-                        currentTupletDuration += thisObject.duration.quarterLength
-                        if (currentTupletDuration == desiredTupletDuration or
-                            # check for things like 6 6 3 6 6; redundant with previous, but written out for clarity
-                            currentTupletDuration/desiredTupletDuration == int(currentTupletDuration/desiredTupletDuration)
-                            ):
-                            thisObject.duration.tuplets[0].type = 'stop'
-                            inTuplet = False
-                            currentTupletDuration = 0.0
-                            desiredTupletDuration = 0.0
-                    lastNote = thisObject
-
+                    thisObject = self.processChordEvent(eventC)
                 else: # Note or Rest
-                    thisObject = hdStringToNote(eventC)
-                    if hasattr(thisObject, 'beams'):
-                        if currentBeamNumbers != 0 and len(thisObject.beams.beamsList) == 0:
-                            for i in range(currentBeamNumbers):
-                                thisObject.beams.append('continue')
-                        elif len(thisObject.beams.beamsList) > 0:
-                            if thisObject.beams.beamsList[0].type == 'stop':
-                                currentBeamNumbers = 0
-                            else:
-                                for i in range(len(thisObject.beams.beamsList)):
-                                    if thisObject.beams.beamsList[i].type != 'stop':
-                                        currentBeamNumbers += 1
-                    # nested tuplets not supported by humdrum...
-                    if inTuplet is False and len(thisObject.duration.tuplets) > 0:
-                        inTuplet = True
-                        desiredTupletDuration = thisObject.duration.tuplets[0].totalTupletLength()
-                        currentTupletDuration = thisObject.duration.quarterLength
-                        thisObject.duration.tuplets[0].type = 'start'
-                    elif inTuplet is True and len(thisObject.duration.tuplets) == 0:
-                        inTuplet = False
-                        desiredTupletDuration = 0.0
-                        currentTupletDuration = 0.0
-                        lastNote.duration.tuplets[0].type = 'stop'
-                    elif inTuplet is True:
-                        currentTupletDuration += thisObject.duration.quarterLength
-                        if (currentTupletDuration == desiredTupletDuration or
-                            # check for things like 6 6 3 6 6; redundant with previous, but written out for clarity
-                            currentTupletDuration/desiredTupletDuration == int(currentTupletDuration/desiredTupletDuration)
-                            ):
-                            thisObject.duration.tuplets[0].type = 'stop'
-                            inTuplet = False
-                            currentTupletDuration = 0.0
-                            desiredTupletDuration = 0.0
-
-                    lastNote = thisObject
+                    thisObject = self.processNoteEvent(eventC)
 
                 if thisObject is not None:
+                    # pylint: disable=attribute-defined-outside-init
                     thisObject.humdrumPosition = event.position
-                    thisObject.humdrumSpineId  = event.spineId
                     thisObject.priority = event.position
-                    self.stream._appendCore(thisObject)
-            except Exception as e:
+                    self.stream.coreAppend(thisObject)
+            except Exception as e: # pylint: disable=broad-except
                 import traceback
-                environLocal.warn("Error in parsing event ('%s') at position %r for spine %r: %s" % (event.contents, event.position, event.spineId, str(e)))
+                environLocal.warn(
+                    "Error in parsing event ('%s') at position %r for spine %r: %s" % (
+                            event.contents, event.position, event.spineId, str(e)))
                 tb = traceback.format_exc()
-                environLocal.printDebug("Traceback for the exeception: \n%s" % (tb))
+                environLocal.printDebug("Traceback for the exception: \n%s" % (tb))
                 # traceback... environLocal.printDebug()
 
-        self.stream._elementsChanged()
+        self.stream.coreElementsChanged()
         ## still to be done later... move things before first measure to first measure!
 
+    def processNoteEvent(self, eventC):
+        '''
+        similar to hdStringToNote, this method processes a string representing a single
+        note, but stores information about current beam and tuplet state.
+        '''
+        eventNote = hdStringToNote(eventC)
+
+        self.setBeamsForNote(eventNote)
+        self.setTupletTypeForNote(eventNote)
+
+        self.lastNote = eventNote
+        return eventNote
+
+
+    def processChordEvent(self, eventC):
+        '''
+        Process a single chord event
+
+        Like processNoteEvent, stores information about current beam and tuplet state.
+        '''
+        ### multipleNotes
+        notesToProcess = eventC.split()
+        chordNotes = []
+        for noteToProcess in notesToProcess:
+            thisNote = hdStringToNote(noteToProcess)
+            chordNotes.append(thisNote)
+        eventChord = chord.Chord(chordNotes, beams=chordNotes[-1].beams)
+        eventChord.duration = chordNotes[0].duration
+
+        self.setBeamsForNote(eventChord)
+        self.setTupletTypeForNote(eventChord)
+        self.lastNote = eventChord
+
+        return eventChord
+
+    def setBeamsForNote(self, n):
+        '''
+        sets the beams for a Note (or Chord) given self.currentBeamNumbers
+        and updates self.currentBeamNumbers based on stop beams.
+
+        Safe enough to use on elements such as rests that don't have beam info.
+        '''
+        if not hasattr(n, 'beams'):
+            return None
+
+        if self.currentBeamNumbers != 0 and not n.beams.beamsList:
+            for unused_counter in range(self.currentBeamNumbers):
+                n.beams.append('continue')
+        elif n.beams.beamsList:
+            if n.beams.beamsList[0].type == 'stop':
+                self.currentBeamNumbers = 0
+            else:
+                for thisBeam in n.beams.beamsList:
+                    if thisBeam.type != 'stop':
+                        self.currentBeamNumbers += 1
+
+    def setTupletTypeForNote(self, n):
+        # nested tuplets not supported by humdrum...
+        nDur = n.duration
+        nTuplets = n.duration.tuplets
+
+        if self.inTuplet is False and nTuplets:
+            self.inTuplet = True
+            self.desiredTupletDuration = nTuplets[0].totalTupletLength()
+            self.currentTupletDuration = nDur.quarterLength
+            n.duration.tuplets[0].type = 'start'
+        elif self.inTuplet is True and not nTuplets:
+            self.inTuplet = False
+            self.desiredTupletDuration = 0.0
+            self.currentTupletDuration = 0.0
+            self.lastNote.duration.tuplets[0].type = 'stop'
+        elif self.inTuplet is True:
+            self.currentTupletDuration += nDur.quarterLength
+            if (self.currentTupletDuration == self.desiredTupletDuration or
+                # check for things like 6 6 3 6 6;
+                # redundant with previous, but written out for clarity
+                    (self.currentTupletDuration / self.desiredTupletDuration) == int(
+                            self.currentTupletDuration / self.desiredTupletDuration)):
+                nTuplets[0].type = 'stop'
+                self.inTuplet = False
+                self.currentTupletDuration = 0.0
+                self.desiredTupletDuration = 0.0
+
 class DynamSpine(HumdrumSpine):
-    '''
+    r'''
     A DynamSpine is a type of humdrum spine with the \*\*dynam
     attribute set and thus events are processed as if they
     are dynamics.
@@ -1327,8 +1444,8 @@ class DynamSpine(HumdrumSpine):
                     thisObject = MiscTandem(eventC)
             elif eventC.startswith('='):
                 if thisContainer is not None:
-                    thisContainer._elementsChanged()
-                    self.stream._appendCore(thisContainer)
+                    thisContainer.coreElementsChanged()
+                    self.stream.coreAppend(thisContainer)
                 thisContainer = hdStringToMeasure(eventC)
             elif eventC.startswith('!'):
                 thisObject = SpineComment(eventC)
@@ -1343,14 +1460,13 @@ class DynamSpine(HumdrumSpine):
                 thisObject = dynamics.Dynamic(eventC)
 
             if thisObject is not None:
-                thisObject.humdrumPosition = event.position
-                thisObject.humdrumSpineId  = event.spineId
+                thisObject.humdrumPosition = event.position # pylint: disable=attribute-defined-outside-init
                 if thisContainer is None:
-                    self.stream._appendCore(thisObject)
+                    self.stream.coreAppend(thisObject)
                 else:
-                    thisContainer._appendCore(thisObject)
+                    thisContainer.coreAppend(thisObject)
 
-        self.stream._elementsChanged()
+        self.stream.coreElementsChanged()
 
 ####### END HUMDRUM SPINES
 
@@ -1391,7 +1507,7 @@ class SpineEvent(object):
     protoSpineId = 0
     spineId = None
 
-    def __init__(self, contents = None, position = 0):
+    def __init__(self, contents=None, position=0):
         self.contents = contents
         self.position = position
 
@@ -1401,8 +1517,8 @@ class SpineEvent(object):
     def __str__(self):
         return self.contents
 
-    def toNote(self, convertString = None):
-        '''
+    def toNote(self, convertString=None):
+        r'''
         parse the object as a \*\*kern note and return the a
         :class:`~music21.note.Note` object (or Rest, or Chord)
 
@@ -1437,6 +1553,8 @@ class SpineCollection(object):
         self.spines = []
         self.nextFreeId  = 0
         self.spineReclassDone = False
+        self.iterIndex = None
+        self.newSpine = None
 
     def __iter__(self):
         '''Resets the counter to len(self.spines) so that iteration is correct'''
@@ -1453,7 +1571,7 @@ class SpineCollection(object):
 
     next = __next__ # py2
 
-    def addSpine(self, streamClass = stream.Part):
+    def addSpine(self, streamClass=stream.Part):
         '''
         creates a new spine in the collection and returns it.
 
@@ -1470,7 +1588,7 @@ class SpineCollection(object):
         0
         >>> newSpine.stream
         <music21.stream.Part ...>
-        >>> newSpine2 = hsc.addSpine(streamClass = stream.Stream)
+        >>> newSpine2 = hsc.addSpine(streamClass=stream.Stream)
         >>> newSpine2.id
         1
         >>> newSpine2
@@ -1478,11 +1596,12 @@ class SpineCollection(object):
         >>> newSpine2.stream
         <music21.stream.Stream ...>
         '''
-        self.newSpine = HumdrumSpine(self.nextFreeId, streamClass = streamClass)
+        self.newSpine = HumdrumSpine(self.nextFreeId, streamClass=streamClass)
         self.newSpine.spineCollection = self
         self.spines.append(self.newSpine)
         self.nextFreeId += 1
-        self.newSpine.isFirstVoice = False # if this is a subspine (Voice) then does it need to close off measures, etc.
+        # if this is a subspine (Voice) then does it need to close off measures, etc.
+        self.newSpine.isFirstVoice = False
         return self.newSpine
 
     def appendSpine(self, spine):
@@ -1577,11 +1696,12 @@ class SpineCollection(object):
         firstStreamForEachInstrument = {}
         for thisSpine in self.spines:
             spineStream = thisSpine.stream
-            instruments = spineStream.getElementsByClass('Instrument')
-            if len(instruments) == 0:
+            instrumentsStream = spineStream.getElementsByClass('Instrument')
+            if not instrumentsStream:
                 spineInstrument = None
             else:
-                spineInstrument = instruments[0].instrumentName
+                spineInstrument = instrumentsStream[0].instrumentName
+
             if spineInstrument not in usedIds:
                 firstStreamForEachInstrument[spineInstrument] = spineStream
                 usedIds[spineInstrument] = 1
@@ -1591,7 +1711,8 @@ class SpineCollection(object):
                 spineStream.id = str(usedIds[None])
             else:
                 if usedIds[spineInstrument] == 1:
-                    firstStreamForEachInstrument[spineInstrument].id = firstStreamForEachInstrument[spineInstrument].id + '-1'
+                    myFirstStream = firstStreamForEachInstrument[spineInstrument]
+                    myFirstStream.id = myFirstStream.id + '-1'
                 usedIds[spineInstrument] += 1
                 spineStream.id = spineInstrument + '-' + str(usedIds[spineInstrument])
 
@@ -1604,7 +1725,7 @@ class SpineCollection(object):
             #removeSpines = []
             if thisSpine.parentSpine is not None:
                 continue
-            if len(thisSpine.childSpines) == 0:
+            if not thisSpine.childSpines:
                 continue
 
             # only spines with children spines and parent spines continue
@@ -1622,27 +1743,29 @@ class SpineCollection(object):
                         self.performSpineInsertion(thisSpine, newStream, i)
                         insertPoints.remove(i)
                     lastHumdrumPosition = humdrumPosition
+                    del el.humdrumPosition
                 except AttributeError: # no el.humdrumPosition
                     pass
-                newStream._appendCore(el)
+                newStream.coreAppend(el)
                 #newStream.append(el)
-            newStream._elementsChanged()
+            newStream.coreElementsChanged()
             thisSpine.stream = newStream
 
-            if len(insertPoints) > 0:
-                # some spines were not inserted because the insertion point was at the end of the parent spine
-                # happens in some musedata conversions, such as beethoven 5, movement 1.
-                for i in insertPoints:
-                    self.performSpineInsertion(thisSpine, newStream, i)
+            # some spines were not inserted because the
+            # insertion point was at the end of the parent spine
+            # happens in some musedata conversions, such as beethoven 5, movement 1.
+            for i in insertPoints:
+                self.performSpineInsertion(thisSpine, newStream, i)
             #for removeMe in removeSpines:
             #    #needed for some tests
             #    self.removeSpineById(removeMe)
 
     def performSpineInsertion(self, thisSpine, newStream, insertionPoint):
         '''
-        Insert all the spines into newStream that should be inserted into thisSpine at insertionPoint.
+        Insert all the spines into newStream that should be
+        inserted into thisSpine at insertionPoint.
         '''
-        newStream._elementsChanged() # update highestTime
+        newStream.coreElementsChanged() # update highestTime
         startPoint = newStream.highestTime
         childrenToInsert = thisSpine.childSpineInsertPoints[insertionPoint]
         voiceNumber = 0
@@ -1656,12 +1779,12 @@ class SpineCollection(object):
                 else:
                     insertEl.groups.append(voiceStr)
                     #newStream.insert(startPoint + insertEl.offset, insertEl)
-                    newStream._insertCore(startPoint + insertEl.offset, insertEl)
-        newStream._elementsChanged() # call between _insertCore and _appendCore
+                    newStream.coreInsert(startPoint + insertEl.offset, insertEl)
+        newStream.coreElementsChanged() # call between coreInsert and coreAppend
 
 
     def reclassSpines(self):
-        '''
+        r'''
         changes the classes of HumdrumSpines to more specific types
         (KernSpine, DynamicSpine)
         according to their spineType (e.g., \*\*kern, \*\*dynam)
@@ -1684,7 +1807,7 @@ class SpineCollection(object):
         '''
         positionDict = {}
         for thisSpine in self.spines:
-            if thisSpine.parentSpine == None:
+            if thisSpine.parentSpine is None:
                 sf = thisSpine.stream.flat
                 for el in sf:
                     if hasattr(el, 'humdrumPosition'):
@@ -1708,13 +1831,13 @@ class SpineCollection(object):
         tf = duration.TupletFixer()
 
         for thisSpine in self.spines:
-            if thisSpine.parentSpine == None:
+            if thisSpine.parentSpine is None:
                 thisSpine.stream = thisSpine.moveElementsIntoMeasures(thisSpine.stream)
 
                 # fix tuplet groups
                 for m in thisSpine.stream.getElementsByClass('Measure'):
                     tf.setStream(m)
-                    tupletGroups = tf.findTupletGroups(incorporateGroupings = True)
+                    tupletGroups = tf.findTupletGroups(incorporateGroupings=True)
                     for tg in tupletGroups:
                         tf.fixBrokenTupletDuration(tg)
 
@@ -1728,46 +1851,57 @@ class SpineCollection(object):
         '''
         kernStreams = {}
         for thisSpine in self.spines:
-            if thisSpine.parentSpine == None:
-                if thisSpine.spineType == 'kern':
-                    for tandem in thisSpine.stream.getElementsByClass('MiscTandem'):
-                        if tandem.tandem.startswith('*staff'):
-                            staffInfo = int(tandem.tandem[6:]) # single staff
-                            kernStreams[staffInfo] = thisSpine.stream
-                            break
+            if thisSpine.parentSpine is not None:
+                continue
+            if thisSpine.spineType != 'kern':
+                continue
+            for tandem in thisSpine.stream.getElementsByClass('MiscTandem'):
+                if not tandem.tandem.startswith('*staff'):
+                    continue
+                staffInfo = int(tandem.tandem[6:]) # single staff
+                kernStreams[staffInfo] = thisSpine.stream
+                break
+
         for thisSpine in self.spines:
-            if thisSpine.parentSpine == None:
-                if thisSpine.spineType != 'kern':
-                    stavesAppliedTo = []
-                    prioritiesToSearch = {}
-                    for tandem in thisSpine.stream.flat.getElementsByClass('MiscTandem'):
-                        if tandem.tandem.startswith('*staff'):
-                            staffInfo = tandem.tandem[6:] # could be multiple staves
-                            stavesAppliedTo = [int(x) for x in staffInfo.split('/')]
-                            break
-                    if thisSpine.spineType == 'dynam':
-                        for dynamic in thisSpine.stream.flat:
-                            if 'Dynamic' in dynamic.classes:
-                                prioritiesToSearch[dynamic.humdrumPosition] = dynamic
-                        for applyStaff in stavesAppliedTo:
-                            applyStream = kernStreams[applyStaff]
-                            for el in applyStream.recurse():
-                                if el.priority in prioritiesToSearch:
-                                    try:
-                                        el.activeSite.insert(el.offset, prioritiesToSearch[el.priority])
-                                    except stream.StreamException: # may appear twice because of voices...
-                                        pass
-                                        #el.activeSite.insert(el.offset, copy.deepcopy(prioritiesToSearch[el.priority]))
-                    elif thisSpine.spineType == 'lyrics' or thisSpine.spineType == 'text':
-                        for text in thisSpine.stream.flat:
-                            if 'ElementWrapper' in text.classes:
-                                prioritiesToSearch[text.humdrumPosition] = text.obj
-                        for applyStaff in stavesAppliedTo:
-                            applyStream = kernStreams[applyStaff]
-                            for el in applyStream.recurse():
-                                if el.priority in prioritiesToSearch:
-                                    lyric = prioritiesToSearch[el.priority].contents
-                                    el.lyric = lyric
+            if thisSpine.parentSpine is not None:
+                continue
+            if thisSpine.spineType == 'kern':
+                continue
+
+            stavesAppliedTo = []
+            prioritiesToSearch = {}
+            for tandem in thisSpine.stream.recurse().getElementsByClass('MiscTandem'):
+                if tandem.tandem.startswith('*staff'):
+                    staffInfo = tandem.tandem[6:] # could be multiple staves
+                    stavesAppliedTo = [int(x) for x in staffInfo.split('/')]
+                    break
+            if thisSpine.spineType == 'dynam':
+                for dynamic in thisSpine.stream.flat:
+                    if 'Dynamic' in dynamic.classes:
+                        prioritiesToSearch[dynamic.humdrumPosition] = dynamic
+                for applyStaff in stavesAppliedTo:
+                    applyStream = kernStreams[applyStaff]
+                    for el in applyStream.recurse():
+                        if el.priority not in prioritiesToSearch:
+                            continue
+                        try:
+                            el.activeSite.insert(el.offset,
+                                                 prioritiesToSearch[el.priority])
+                        except exceptions21.StreamException:
+                            # may appear twice because of voices...
+                            pass
+                            #el.activeSite.insert(el.offset,
+                            #    copy.deepcopy(prioritiesToSearch[el.priority]))
+            elif thisSpine.spineType in ('lyrics', 'text'):
+                for text in thisSpine.stream.recurse():
+                    if 'ElementWrapper' in text.classes:
+                        prioritiesToSearch[text.humdrumPosition] = text.obj
+                for applyStaff in stavesAppliedTo:
+                    applyStream = kernStreams[applyStaff]
+                    for el in applyStream.recurse():
+                        if el.priority in prioritiesToSearch:
+                            lyric = prioritiesToSearch[el.priority].contents
+                            el.lyric = lyric
 
 
     def makeVoices(self):
@@ -1779,42 +1913,46 @@ class SpineCollection(object):
         Should be done after measures have been made.
         '''
         for thisSpine in self.spines:
-            if thisSpine.spineType == 'kern' and thisSpine.parentSpine == None:
-                thisStream = thisSpine.stream
-                for el in thisStream:
-                    if 'Measure' in el.classes:
-                        hasVoices = False
-                        lowestVoiceOffset = 0
-                        for mEl in el:
-                            if 'voice1' in mEl.groups:
-                                hasVoices = True
-                                lowestVoiceOffset = mEl.offset
-                                break
-                        if hasVoices is True:
-                            voices = [None for i in range(10)]
-                            measureElements = el.elements
-                            for mEl in measureElements:
-                                mElGroups = mEl.groups
-                                #print mEl, mElGroups
-                                if len(mElGroups) > 0 and mElGroups[0].startswith('voice'):
-                                    voiceName = mElGroups[0]
-                                    voiceNumber = int(voiceName[5])
-                                    voicePart = voices[voiceNumber]
-                                    if voicePart is None:
-                                        voices[voiceNumber] = stream.Voice()
-                                        voicePart = voices[voiceNumber]
-                                        voicePart.groups.append(voiceName)
-                                    mElOffset = mEl.offset
-                                    el.remove(mEl)
-                                    voicePart._insertCore(mElOffset - lowestVoiceOffset, mEl)
-                            #print voices
-                            for voicePart in voices:
-                                if voicePart is not None:
-                                    #voicePart.show('text')
-                                    voicePart._elementsChanged()
-                                    el._insertCore(lowestVoiceOffset, voicePart)
-                            el._elementsChanged()
-                            #print el.number, "has voices at", lowestVoiceOffset
+            if thisSpine.spineType != 'kern' or thisSpine.parentSpine is not None:
+                continue
+            thisStream = thisSpine.stream
+            for el in thisStream.getElementsByClass('Measure'):
+                hasVoices = False
+                lowestVoiceOffset = 0
+                for mEl in el:
+                    if 'voice1' in mEl.groups:
+                        hasVoices = True
+                        lowestVoiceOffset = mEl.offset
+                        break
+                if not hasVoices:
+                    continue
+
+                voices = [None for i in range(10)]
+                measureElements = el.elements
+                for mEl in measureElements:
+                    mElGroups = mEl.groups
+                    #print mEl, mElGroups
+                    if not mElGroups or not mElGroups[0].startswith('voice'):
+                        continue
+
+                    voiceName = mElGroups[0]
+                    voiceNumber = int(voiceName[5])
+                    voicePart = voices[voiceNumber]
+                    if voicePart is None:
+                        voices[voiceNumber] = stream.Voice()
+                        voicePart = voices[voiceNumber]
+                        voicePart.groups.append(voiceName)
+                    mElOffset = mEl.offset
+                    el.remove(mEl)
+                    voicePart.coreInsert(mElOffset - lowestVoiceOffset, mEl)
+                #print voices
+                for voicePart in voices:
+                    if voicePart is not None:
+                        #voicePart.show('text')
+                        voicePart.coreElementsChanged()
+                        el.coreInsert(lowestVoiceOffset, voicePart)
+                el.coreElementsChanged()
+                #print el.number, "has voices at", lowestVoiceOffset
 
 
     def parseMusic21(self):
@@ -1828,7 +1966,7 @@ class SpineCollection(object):
 
     # TODO: append global comments and have a way of recalling them
 
-    
+
 class EventCollection(object):
     '''
     An EventCollection is a time slice of all events that have
@@ -1852,9 +1990,9 @@ class EventCollection(object):
     >>> SE = humdrum.spineParser.SpineEvent
     >>> eventList1 = [SE('C4'),SE('pp')]
     >>> eventList2 = [SE('D4'),SE('.')]
-    >>> ec1 = humdrum.spineParser.EventCollection(maxSpines = 2)
+    >>> ec1 = humdrum.spineParser.EventCollection(maxSpines=2)
     >>> ec1.events = eventList1
-    >>> ec2 = humdrum.spineParser.EventCollection(maxSpines = 2)
+    >>> ec2 = humdrum.spineParser.EventCollection(maxSpines=2)
     >>> ec2.events = eventList2
     >>> ec2.lastEvents[1] = eventList1[1]
     >>> ec2.maxSpines
@@ -1862,7 +2000,7 @@ class EventCollection(object):
     >>> ec2.getAllOccurring()
     [<music21.humdrum.spineParser.SpineEvent D4>, <music21.humdrum.spineParser.SpineEvent pp>]
     '''
-    def __init__(self, maxSpines = 0):
+    def __init__(self, maxSpines=0):
         self.events = common.defaultlist(lambda:None)
         self.lastEvents = common.defaultlist(lambda:None)
         self.maxSpines = maxSpines
@@ -1877,7 +2015,7 @@ class EventCollection(object):
         self.lastEvents[spineNum] = spineEvent
 
     def addGlobalEvent(self, globalEvent):
-        for i in range(0, self.maxSpines):
+        for i in range(self.maxSpines):
             self.events[i] = globalEvent
 
     def getSpineEvent(self, spineNum):
@@ -1894,15 +2032,10 @@ class EventCollection(object):
 
     def getAllOccurring(self):
         retEvents = []
-        for i in range(0, self.maxSpines):
+        for i in range(self.maxSpines):
             retEvents.append(self.getSpineOccurring(i))
         return retEvents
 
-class HumdrumException(exceptions21.Music21Exception):
-    '''
-    General Exception class for problems relating to Humdrum
-    '''
-    pass
 
 def hdStringToNote(contents):
     '''
@@ -1937,27 +2070,32 @@ def hdStringToNote(contents):
     'Imperfect Maxima'
 
 
-    Note that this is one note in the time of a double-dotted quarter,
-    not a double-dotted quarter-note triplet (incorrectly used in
+    Note that the following example is interpreted as one note in the time of a
+    double-dotted quarter not a double-dotted quarter-note triplet.
+
+    I believe that the latter definition, though used in
     http://kern.ccarh.org/cgi-bin/ksdata?l=musedata/mozart/quartet&file=k421-01.krn&f=kern
-    and the Josquin Research Project [JRP]
-    but contradicts the specification in
-    http://www.lib.virginia.edu/artsandmedia/dmmc/Music/Humdrum/kern_hlp.html#tuplets )
+    and the Josquin Research Project [JRP] is incorrect, seeing as it
+    contradicts the specification in
+    http://www.music-cog.ohio-state.edu/Humdrum/representations/kern.html#N-Tuplets
 
     >>> storedFlavors = humdrum.spineParser.flavors['JRP'] # DOCS_HIDE
 
     This is the default:
+
     >>> humdrum.spineParser.flavors['JRP'] = False
 
     >>> n = humdrum.spineParser.hdStringToNote("6..fff")
     >>> n.duration.quarterLength
     Fraction(7, 6)
+
     >>> n.duration.dots
     0
+
     >>> n.duration.tuplets[0].durationNormal.dots
     2
 
-    If you want the incorrect definition, set humdrum.spineParser.flavors['JRP'] = True
+    If you want the JRP definition, set humdrum.spineParser.flavors['JRP'] = True
     before calling converter.parse() or anything like that:
 
     >>> humdrum.spineParser.flavors['JRP'] = True
@@ -1971,8 +2109,8 @@ def hdStringToNote(contents):
 
     >>> n = humdrum.spineParser.hdStringToNote("gg#q/LL")
     >>> n.duration
-    <music21.duration.Duration unlinked type:eighth quarterLength:0.0>
-    >>> n.isGrace
+    <music21.duration.GraceDuration unlinked type:eighth quarterLength:0.0>
+    >>> n.duration.isGrace
     True
 
     >>> humdrum.spineParser.flavors['JRP'] = storedFlavors # DOCS_HIDE
@@ -1993,7 +2131,7 @@ def hdStringToNote(contents):
             octave = 3 + len(kernNoteName)
         else: # below middle C
             octave = 4 - len(kernNoteName)
-        thisObject = note.Note(octave = octave)
+        thisObject = note.Note(octave=octave)
         thisObject.step = step
 
     # 3.3 -- Rests
@@ -2002,29 +2140,29 @@ def hdStringToNote(contents):
     else:
         raise HumdrumException("Could not parse %s for note information" % contents)
 
-    matchedSharp = re.search("(\#+)", contents)
-    matchedFlat  = re.search("(\-+)", contents)
+    matchedSharp = re.search(r"(\#+)", contents)
+    matchedFlat  = re.search(r"(\-+)", contents)
 
     if matchedSharp:
-        thisObject.accidental = matchedSharp.group(0)
+        thisObject.pitch.accidental = matchedSharp.group(0)
     elif matchedFlat:
-        thisObject.accidental = matchedFlat.group(0)
+        thisObject.pitch.accidental = matchedFlat.group(0)
     elif contents.count("n"):
-        thisObject.accidental = "n"
+        thisObject.pitch.accidental = "n"
 
     # 3.2.2 -- Slurs, Ties, Phrases
     # TODO: add music21 phrase information
     if contents.count('{'):
-        for i in range(0, contents.count('{')):
+        for i in range(contents.count('{')):
             pass # phraseMark start
     if contents.count('}'):
-        for i in range(0, contents.count('}')):
+        for i in range(contents.count('}')):
             pass # phraseMark end
     if contents.count('('):
-        for i in range(0, contents.count('(')):
+        for i in range(contents.count('(')):
             pass # slur start
     if contents.count(')'):
-        for i in range(0, contents.count(')')):
+        for i in range(contents.count(')')):
             pass # slur end
     if contents.count('['):
         thisObject.tie = tie.Tie("start")
@@ -2099,8 +2237,8 @@ def hdStringToNote(contents):
     # 3.2.8 N-Tuplets
 
     ## TODO: SPEEDUP -- only search for rational after foundNumber...
-    foundRational = re.search("(\d+)\%(\d+)", contents)
-    foundNumber = re.search("(\d+)", contents)
+    foundRational = re.search(r"(\d+)\%(\d+)", contents)
+    foundNumber = re.search(r"(\d+)", contents)
     if foundRational:
         durationFirst = int(foundRational.group(1))
         durationSecond = float(foundRational.group(2))
@@ -2112,11 +2250,13 @@ def hdStringToNote(contents):
         durationType = int(foundNumber.group(1))
         if durationType == 0:
             durationString = foundNumber.group(1)
-            if durationString == '000': # for larger values, see http://wiki.humdrum.org/index.php/Rational_rhythms
+            if durationString == '000':
+                # for larger values, see http://wiki.humdrum.org/index.php/Rational_rhythms
                 thisObject.duration.type = 'maxima'
                 if contents.count('.'):
                     thisObject.duration.dots = contents.count('.')
-            elif durationString == '00': # for larger values, see http://wiki.humdrum.org/index.php/Rational_rhythms
+            elif durationString == '00':
+                # for larger values, see http://wiki.humdrum.org/index.php/Rational_rhythms
                 thisObject.duration.type = 'longa'
                 if contents.count('.'):
                     thisObject.duration.dots = contents.count('.')
@@ -2131,22 +2271,23 @@ def hdStringToNote(contents):
         else:
             dT = int(durationType) + 0.0
             (unused_remainder, exponents) = math.modf(math.log(dT, 2))
-            basevalue = 2**exponents
+            basevalue = 2 ** exponents
             thisObject.duration.type = duration.typeFromNumDict[int(basevalue)]
             newTup = duration.Tuplet()
-            newTup.durationActual.type = thisObject.duration.type
-            newTup.durationNormal.type = thisObject.duration.type
+            newTup.durationActual = duration.durationTupleFromTypeDots(thisObject.duration.type, 0)
+            newTup.durationNormal = duration.durationTupleFromTypeDots(thisObject.duration.type, 0)
 
             gcd = common.euclidGCD(int(dT), basevalue)
-            newTup.numberNotesActual = int(dT/gcd)
-            newTup.numberNotesNormal = int(float(basevalue)/gcd)
+            newTup.numberNotesActual = int(dT / gcd)
+            newTup.numberNotesNormal = int(float(basevalue) / gcd)
 
             # The Josquin Research Project uses an incorrect definition of
             # humdrum tuplets that breaks normal usage.  TODO: Refactor adding a Flavor = "JRP"
             # code that uses this other method...
             JRP = flavors['JRP']
             if JRP is False and contents.count('.'):
-                newTup.durationNormal.dots = contents.count('.')
+                newTup.durationNormal = duration.durationTupleFromTypeDots(
+                                                newTup.durationNormal.type, contents.count('.'))
 
             thisObject.duration.appendTuplet(newTup)
             if JRP is True and contents.count('.'):
@@ -2168,24 +2309,24 @@ def hdStringToNote(contents):
 
     # 3.2.10 Beaming
     # TODO: Support really complex beams
-    for i in range(0, contents.count('L')):
+    for i in range(contents.count('L')):
         thisObject.beams.append('start')
-    for i in range(0, contents.count('J')):
+    for i in range(contents.count('J')):
         thisObject.beams.append('stop')
-    for i in range(0, contents.count('k')):
+    for i in range(contents.count('k')):
         thisObject.beams.append('partial', 'right')
-    for i in range(0, contents.count('K')):
+    for i in range(contents.count('K')):
         thisObject.beams.append('partial', 'right')
 
     return thisObject
 
-def hdStringToMeasure(contents, previousMeasure = None):
+def hdStringToMeasure(contents, previousMeasure=None):
     '''
     kern uses an equals sign followed by processing instructions to
     create new measures.  Here is how...
     '''
     m1 = stream.Measure()
-    rematchMN = re.search("(\d+)([a-z]?)", contents)
+    rematchMN = re.search(r"(\d+)([a-z]?)", contents)
 
 
     if rematchMN:
@@ -2248,8 +2389,9 @@ def hdStringToMeasure(contents, previousMeasure = None):
             barline.repeat_dots = "both"
             ## cannot specify single repeat dots without styles
         if contents == "==|":
-            raise HumdrumException \
-                ("Cannot import a double bar visually rendered as a single bar -- not sure exactly what that would mean anyhow.")
+            raise HumdrumException(
+                 "Cannot import a double bar visually rendered as a single bar -- " +
+                 "not sure exactly what that would mean anyhow.")
 
     if contents.count(';'):
         barline.pause = expressions.Fermata()
@@ -2317,13 +2459,13 @@ def kernTandemToObject(tandem):
             return MM
         except ValueError:
             # assuming that metronomeMark here is text now
-            metronomeMark = re.sub('^\[','', metronomeMark)
-            metronomeMark = re.sub(']\s*$','', metronomeMark)
+            metronomeMark = re.sub(r'^\[', '', metronomeMark)
+            metronomeMark = re.sub(r']\s*$', '', metronomeMark)
             MS = tempo.MetronomeMark(text=metronomeMark)
             return MS
     elif tandem.startswith("*M"):
         meterType = tandem[2:]
-        tsTemp = re.match('(\d+)/(\d+)', meterType)
+        tsTemp = re.match(r'(\d+)/(\d+)', meterType)
         if (tsTemp):
             numerator = int(tsTemp.group(1))
             denominator = tsTemp.group(2)
@@ -2342,7 +2484,7 @@ def kernTandemToObject(tandem):
                 return meter.TimeSignature('%d/%d' % (numerator, denominator))
         else:
             raise HumdrumException('Incorrect meter: %s found', tandem)
-        
+
     elif tandem.startswith("*IC"):
         instrumentClass = tandem[3:]
         try:
@@ -2351,11 +2493,11 @@ def kernTandemToObject(tandem):
         except instruments.HumdrumInstrumentException:
             return MiscTandem(instrumentClass)
     elif tandem.startswith("*IG"):
-        instrumentGroup = tandem[3:]
+        #instrumentGroup = tandem[3:]
         return MiscTandem(tandem)
         # TODO: DO SOMETHING WITH INSTRUMENT GROUP; not in hum2xml
     elif tandem.startswith("*ITr"):
-        instrumentTransposing = True
+        #instrumentTransposing = True
         return MiscTandem(tandem)
         # TODO: DO SOMETHING WITH TRANSPOSING INSTRUMENTS; not in hum2xml
     elif tandem.startswith("*I"): # order has to be last
@@ -2391,9 +2533,10 @@ def kernTandemToObject(tandem):
 
 
 class MiscTandem(base.Music21Object):
-    def __init__(self, tandem = ""):
-        base.Music21Object.__init__(self)
+    def __init__(self, tandem=""):
+        super(MiscTandem, self).__init__()
         self.tandem = tandem
+
     def __repr__(self):
         return "<music21.humdrum.spineParser.MiscTandem %s humdrum control>" % self.tandem
 
@@ -2409,9 +2552,9 @@ class SpineComment(base.Music21Object):
     'this is a spine comment'
     '''
 
-    def __init__(self, comment = ""):
-        base.Music21Object.__init__(self)
-        commentPart = re.sub('^\!+\s?','', comment)
+    def __init__(self, comment=""):
+        super(SpineComment, self).__init__()
+        commentPart = re.sub(r'^\!+\s?', '', comment)
         self.comment = commentPart
 
     def __repr__(self):
@@ -2429,9 +2572,9 @@ class GlobalComment(base.Music21Object):
     'this is a global comment'
     '''
 
-    def __init__(self, comment = ""):
-        base.Music21Object.__init__(self)
-        commentPart = re.sub('^\!\!+\s?','', comment)
+    def __init__(self, comment=""):
+        super(GlobalComment, self).__init__()
+        commentPart = re.sub(r'^\!\!+\s?', '', comment)
         commentPart = commentPart.strip()
         self.comment = commentPart
 
@@ -2440,7 +2583,8 @@ class GlobalComment(base.Music21Object):
 
 class GlobalReference(base.Music21Object):
     '''
-    A Music21Object that represents a reference in the score
+    A Music21Object that represents a reference in the score, called a "reference record"
+    in Humdrum.  See Humdrum User's Guide Chapter 2.
 
 
     >>> sc = humdrum.spineParser.GlobalReference('!!!REF:this is a global reference')
@@ -2461,24 +2605,94 @@ class GlobalReference(base.Music21Object):
     >>> sc.value
     'this is a global reference'
 
+    Language codes are parsed:
+
+    >>> sc = humdrum.spineParser.GlobalReference('!!!OPT@@RUS: Vesna svyashchennaya')
+    >>> sc.code
+    'OPT'
+    >>> sc.language
+    'RUS'
+    >>> sc.isPrimary
+    True
+
+    >>> sc = humdrum.spineParser.GlobalReference('!!!OPT@FRE: Le sacre du printemps')
+    >>> sc.code
+    'OPT'
+    >>> sc.language
+    'FRE'
+    >>> sc.isPrimary
+    False
+
     '''
 
-    def __init__(self, codeOrAll = "", valueOrNone = None):
-        base.Music21Object.__init__(self)
-        codeOrAll = re.sub('^\!\!\!+','', codeOrAll)
+    def __init__(self, codeOrAll="", valueOrNone=None):
+        super(GlobalReference, self).__init__()
+        codeOrAll = re.sub(r'^\!\!\!+', '', codeOrAll)
         codeOrAll = codeOrAll.strip()
         if valueOrNone is None and ':' in codeOrAll:
-            valueOrNone = re.sub('^.*?\:','', codeOrAll)
-            codeOrAll = re.sub('\:.*$', '', codeOrAll)
+            valueOrNone = re.sub(r'^.*?\:', '', codeOrAll)
+            codeOrAll = re.sub(r'\:.*$', '', codeOrAll)
         self.code = codeOrAll
         self.value = valueOrNone
+        self.language = None  # does it have a language code?
+        self.isPrimary = False # is this language marked as primary?
+        if '@@' in self.code:
+            self.isPrimary = True
+            self.code = self.code.replace('@@', '@')
+        if '@' in self.code:
+            self.code, self.language = self.code.split('@')
+
+    def updateMetadata(self, md):
+        '''
+        update a metadata object according to information in this GlobalReference
+
+        See humdrum guide Appendix I for information
+        '''
+        c = self.code
+        v = self.value
+        wasParsed = True
+
+        contributorNames = {
+            'COM': 'composer',
+            'COA': 'attributed composer',
+            'COS': 'suspected composer',
+            'COL': 'composer alias',
+            'COC': 'corporate composer',
+            'LYR': 'lyricist',
+            'LIB': 'librettist',
+            'LAR': 'arranger',
+            'LOR': 'orchestrator',
+            'TRN': 'translator',
+            'YOO': 'original document owner',
+            'YOE': 'original editor',
+            'EED': 'electronic editor',
+            'ENC': 'electronic encoder'
+        }
+
+
+        if c in contributorNames:
+            contrib = metadata.Contributor()
+            contrib.role = contributorNames[c]
+            contrib.name = v
+            md.addContributor(contrib)
+
+        elif c.lower() in md.workIdAbbreviationDict:
+            md.setWorkId(c, v)
+
+        elif c == 'YEC': # electronic edition copyright.
+            md.copyright = v
+
+        else:
+            wasParsed = False
+
+        return wasParsed
+
 
     def __repr__(self):
         return '<music21.humdrum.spineParser.GlobalReference %s "%s">' % (self.code, self.value)
 
 
 class Test(unittest.TestCase):
-
     def runTest(self):
         pass
 
@@ -2486,6 +2700,7 @@ class Test(unittest.TestCase):
         #hf1 = HumdrumFile("d:/web/eclipse/music21misc/mazurka06-2.krn")
 
         hf1 = HumdrumDataCollection(testFiles.mazurka6)
+        hf1.parse()
 
     #    hf1 = HumdrumFile("d:/web/eclipse/music21misc/ojibway.krn")
     #    for thisEventCollection in hf1.eventCollections:
@@ -2496,20 +2711,21 @@ class Test(unittest.TestCase):
     #            print "NONE"
 
     #    for mySpine in hf1.spineCollection:
-    #        print "\n\n***NEW SPINE: No. " + str(mySpine.id) + " parentSpine: " \
-    #            + str(mySpine.parentSpine) + " childSpines: " + str(mySpine.childSpines)
-    #        print mySpine.spineType
+    #        print("\n\n***NEW SPINE: No. " + str(mySpine.id) + " parentSpine: "
+    #            + str(mySpine.parentSpine) + " childSpines: " + str(mySpine.childSpines))
+    #        print(mySpine.spineType)
     #        for childSpinesSpine in mySpine.childSpinesSpines():
-    #            print str(childSpinesSpine.id) + " *** testing spineCollection code ***"
+    #            print(str(childSpinesSpine.id) + " *** testing spineCollection code ***")
     #        for thisEvent in mySpine:
-    #            print thisEvent.contents
+    #            print(thisEvent.contents)
         spine5 = hf1.spineCollection.getSpineById(5)
         self.assertEqual(spine5.id, 5)
         self.assertEqual(spine5.parentSpine.id, 1)
 
         spine1 = hf1.spineCollection.getSpineById(1)
         spine1Children = [cs.id for cs in spine1.childSpines]
-        self.assertEqual(spine1Children, [5, 6, 9, 10, 13, 14, 23, 24, 27, 28, 31, 32, 35, 36, 39, 40])
+        self.assertEqual(spine1Children,
+                         [5, 6, 9, 10, 13, 14, 23, 24, 27, 28, 31, 32, 35, 36, 39, 40])
 
         self.assertEqual(spine5.spineType, "kern")
         self.assertTrue(isinstance(spine5, KernSpine))
@@ -2517,20 +2733,19 @@ class Test(unittest.TestCase):
     def testSingleNote(self):
         a = SpineEvent("40..ccccc##_wtLLK~v/")
         b = a.toNote()
-        self.assertEqual(b.accidental.name, "double-sharp")
+        self.assertEqual(b.pitch.accidental.name, "double-sharp")
         self.assertEqual(b.duration.dots, 0)
         self.assertEqual(b.duration.tuplets[0].durationNormal.dots, 2)
 
     def testMeasureBoundaries(self):
-        from music21 import stream
         m0 = stream.Measure()
         m1 = hdStringToMeasure("=29a;:|:", m0)
         self.assertEqual(m1.number, 29)
         self.assertEqual(m1.numberSuffix, "a")
         self.assertEqual(m0.rightBarline.style, "regular")
         self.assertEqual(m0.rightBarline.repeat_dots, "both")
-        assert m0.rightBarline.pause is not None
-        assert isinstance(m0.rightBarline.pause, expressions.Fermata)
+        self.assertTrue(m0.rightBarline.pause is not None)
+        self.assertTrue(isinstance(m0.rightBarline.pause, expressions.Fermata))
 
     def testMeterBreve(self):
         m = kernTandemToObject("*M3/1")
@@ -2541,7 +2756,7 @@ class Test(unittest.TestCase):
         self.assertEqual(str(m), '<music21.meter.TimeSignature 12/1>')
         m = kernTandemToObject("*M3/000")
         self.assertEqual(str(m), '<music21.meter.TimeSignature 24/1>')
-        
+
 
     def xtestFakePiece(self):
         '''
@@ -2557,12 +2772,12 @@ class Test(unittest.TestCase):
 #        hf1 = HumdrumDataCollection(testFiles.schubert)
 #        hf1 = HumdrumDataCollection(testFiles.ivesSpring)
 #        hf1 = HumdrumDataCollection(testFiles.sousaStars) # parse errors b/c of graces
+        hf1.parse()
         masterStream = hf1.stream
 #        for spineX in hf1.spineCollection:
 #            spineX.stream.id = "spine %s" % str(spineX.id)
 #            masterStream.append(spineX.stream)
-        #expectedOutput = canonicalOutput.mazurka6repr
-#        self.assertTrue(common.basicallyEqual
+#        self.assertTrue(common.whitespaceEqual
 #                          (common.stripAddresses(expectedOutput),
 #                           common.stripAddresses(masterStream._reprText())))
 #        print common.stripAddresses(expectedOutput)
@@ -2594,18 +2809,36 @@ class Test(unittest.TestCase):
 
     def testSplitSpines(self):
         hf1 = HumdrumDataCollection(testFiles.splitSpines2)
-        unused_masterStream = hf1.stream
-        #masterStream.show('text')
+        hf1.parse()
+        masterStream = hf1.stream
+        self.assertTrue(masterStream.parts[0].measure(4).hasVoices())
+        self.assertFalse(masterStream.parts[0].measure(5).hasVoices())
 
-    def testMoveDynamics(self):
+    def xtestMoveDynamics(self):
         hf1 = HumdrumDataCollection(testFiles.fakeTest)
-        #hf1.parseLines()
+        hf1.parse()
         #hf1.spineCollection.moveDynamicsAndLyricsToStreams()
-        unused_s = hf1.stream #.show()
+        unused_s = hf1.stream
+        #unused_s.show('text')
+
+
+    def testSplitSpines2(self):
+        '''
+        Currently this does not work since a second split on a stream that
+        already resulted from a split does not parse properly.  Shows up also
+        in strangeWTCOpening, below.
+        '''
+        hf1 = HumdrumDataCollection(testFiles.splitLots)
+        unused_masterStream = hf1.stream
+
+    def testParseStrangeSplit(self):
+        hf1 = HumdrumDataCollection(testFiles.strangeWTCOpening)
+        unused_masterStream = hf1.stream
+
 
     def testSpineComments(self):
         hf1 = HumdrumDataCollection(testFiles.fakeTest)
-        hf1.parseLines()
+        hf1.parse()
         s = hf1.stream #.show()
         p = s.parts[2] # last part has a comment
         comments = []
@@ -2614,7 +2847,39 @@ class Test(unittest.TestCase):
         self.assertTrue('spine comment' in comments)
         #s.show('text')
 
-class TestExternal(unittest.TestCase):
+    def testMetadataRetrieved(self):
+        from music21 import corpus
+        c = corpus.parse('palestrina/agnus_0')
+        md = c.metadata
+        self.assertIsNotNone(md.composer)
+        self.assertIn('Palestrina', md.composer)
+        
+
+    def testFlavors(self):
+        prevFlavor = flavors['JRP']
+        flavors['JRP'] = False
+        hdc = HumdrumDataCollection(testFiles.dottedTuplet)
+        hdc.parse()
+        c = hdc.stream
+        flavors['JRP'] = True
+        hdc2 = HumdrumDataCollection(testFiles.dottedTuplet)
+        hdc2.parse()
+        d = hdc2.stream
+        flavors['JRP'] = prevFlavor
+        cn = c.parts[0].measure(1).notes[1]
+        dn = d.parts[0].measure(1).notes[1]
+        self.assertEqual(cn.duration.fullName, 'Eighth Triplet (1/2 QL)')
+        self.assertEqual(cn.duration.dots, 0)
+        self.assertEqual(repr(cn.duration.tuplets[0].durationNormal),
+                         "DurationTuple(type='eighth', dots=1, quarterLength=0.75)")
+        self.assertEqual(cn.duration.tuplets[0].durationNormal.dots, 1)
+        self.assertEqual(dn.duration.fullName, 'Dotted Eighth Triplet (1/2 QL)')
+        self.assertEqual(dn.duration.dots, 1)
+        self.assertEqual(repr(dn.duration.tuplets[0].durationNormal),
+                         "DurationTuple(type='eighth', dots=0, quarterLength=0.5)")
+        self.assertEqual(dn.duration.tuplets[0].durationNormal.dots, 0)
+
+class TestExternal(unittest.TestCase): # pragma: no cover
 
     def runTest(self):
         pass
@@ -2625,11 +2890,8 @@ class TestExternal(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    #Test().testMoveDynamics()
     import music21
-    #c = music21.converter.parse(r'd:\desktop\b5-new.krn')
-    #c.show()
-    music21.mainTest(Test) #, TestExternal)
+    music21.mainTest(Test) #, runTest='testMetadataRetrieved') #, TestExternal)
 
 #------------------------------------------------------------------------------
 # eof

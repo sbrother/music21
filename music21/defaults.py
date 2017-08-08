@@ -9,12 +9,12 @@
 # Copyright:    Copyright © 2009-2010 Michael Scott Cuthbert and the music21 Project
 # License:      LGPL or BSD, see license.txt
 #-------------------------------------------------------------------------------
-
-'''Simple storage for data defaults used throughout music21.
+'''
+Simple storage for data defaults used throughout music21.
 '''
 
 
-import unittest, doctest
+import unittest
 
 # note: this module should not import any higher level modules
 
@@ -22,7 +22,7 @@ _MOD = 'defaults.py'
 
 
 
-# TODO: defaults should check the environment object to see 
+# TODO: defaults should check the environment object to see
 # if there are any preferences set for values used here
 
 
@@ -34,16 +34,15 @@ class DefaultsException(Exception):
 
 title = 'Music21 Fragment'
 author = 'Music21'
-software = 'Music21' # used in xml encoding source software 
-
+software = 'Music21' # used in xml encoding source software
 
 meterNumerator = 4
 meterDenominator = 'quarter'
 meterDenominatorBeatType = 4  # musicxml representation
 
-limitOffsetDenominator = 65535 # > CD track level precision. 
+limitOffsetDenominator = 65535 # > CD track level precision.
 # allows for tuples up to n:x within m:y within l:z within k:w where x,y,z <=100 and w<=44
-# not allowing more can be construed as a feature. 
+# not allowing more can be construed as a feature.
 
 
 pitchStep = 'C'
@@ -88,12 +87,32 @@ divisionsPerQuarter = 32*3*3*5*7 # 10080
 # while a supposedly 16 bit unsigned value
 # midi.py gives an error with 10080
 ticksPerQuarter = 1024
+# how many ticks to pad as a rest at the beginning of a MIDI file.
+# also used to pad the end...
+ticksAtStart = 1024
+
+# quantizationQuarterLengthDivisors
+# what to snap MIDI quantization to.  (4, 3) indicates sixteenth notes and triplets.
+
+quantizationQuarterLengthDivisors = (4, 3)
 
 
 # scaling -- the size of notes in musicxml -- 40 tenths = a 5-line staff
 # so how many millimeters = a staff?
 scalingMillimeters = 7
 scalingTenths = 40
+
+
+ipythonImageDpi = 200 # retina...
+
+
+# multmeasure rests
+multiMeasureRestUseSymbols = True
+multiMeasureRestMaxSymbols = 11
+
+# id numbers above this number will be considered memory locations
+# and rewritten on thaw.
+minIdNumberToConsiderMemoryLocation = 100000001
 
 #-----------------------------------------------------------------||||||||||||--
 class Test(unittest.TestCase):
@@ -110,11 +129,8 @@ class Test(unittest.TestCase):
 
 #-----------------------------------------------------------------||||||||||||--
 if __name__ == "__main__":
-    s1 = doctest.DocTestSuite(__name__)
-    s2 = unittest.defaultTestLoader.loadTestsFromTestCase(Test)
-    s1.addTests(s2)
-    runner = unittest.TextTestRunner()
-    runner.run(s1)  
+    import music21
+    music21.mainTest(Test)
 
 #------------------------------------------------------------------------------
 # eof

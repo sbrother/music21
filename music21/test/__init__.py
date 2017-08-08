@@ -3,21 +3,15 @@
 from music21.test.dedent import dedent
 
 __all__ = [
+    'coverageM21',
+    'commonTest',
     'dedent',
-    'test', 
-    'testDocumentation', 
-    'testExternal', 
-    'testPerformance', 
-    'timeGraphs', 
+    'testExternal',
+    'testPerformance',
+    'testRunner',
+    'timeGraphs',
     'testStream',
     ]
-
-import sys
-
-if sys.version > '3':
-    from . import testStream
-else:
-    import testStream # @Reimport
 
 _DOC_IGNORE_MODULE_OR_PACKAGE = True
 

@@ -24,72 +24,187 @@ A piano reduction of Giuseppi Verdi's famous aria from the opera
 Rigoletto, "La Donna É Mobile," in Bb major and 3/8 time.
 
 
->>> from music21 import corpus
 >>> verdi = corpus.parse('verdi/laDonnaEMobile')
 >>> #_DOCS_SHOW verdi.show('braille')
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠣⠣⠼⠉⠦⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠁⠀⠅⠜⠄⠜⠁⠇⠇⠑⠛⠗⠑⠞⠞⠕⠜⠋⠄⠍⠀⠦⠨⠑⠦⠑⠦⠑⠀⠀
-⠀⠀⠀⠇⠜⠘⠚⠸⠛⠼⠴⠛⠼⠴⠀⠀⠀⠀⠀⠀⠀⠀⠘⠚⠸⠛⠼⠴⠛⠼⠴
-⠀⠉⠀⠅⠜⠨⠦⠨⠿⠄⠉⠏⠉⠹⠀⠀⠀⠀⠀⠀⠀⠨⠙⠙⠙⠀⠀⠀⠀⠀
-⠀⠀⠀⠇⠜⠄⠄⠭⠸⠛⠬⠒⠛⠬⠒⠣⠜⠘⠻⠄⠀⠘⠛⠸⠛⠬⠒⠛⠬⠒
-⠀⠑⠀⠅⠜⠨⠦⠨⠯⠄⠉⠕⠉⠺⠀⠀⠀⠀⠀⠀⠀⠦⠨⠑⠦⠙⠦⠚⠀⠀
-⠀⠀⠀⠇⠜⠄⠄⠭⠸⠛⠼⠴⠛⠼⠴⠣⠜⠘⠻⠄⠀⠘⠛⠸⠛⠼⠴⠛⠼⠴
-⠀⠛⠀⠅⠜⠐⠾⠄⠉⠎⠪⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠨⠙⠉⠚⠉⠓⠀⠀⠀
-⠀⠀⠀⠇⠜⠄⠄⠭⠸⠛⠔⠒⠛⠔⠒⠣⠜⠘⠻⠄⠀⠘⠛⠸⠛⠔⠒⠛⠔⠒
-⠀⠊⠀⠅⠜⠐⠷⠄⠉⠟⠻⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠜⠋⠋⠄⠦⠨⠑⠦⠑⠦⠑
-⠀⠀⠀⠇⠜⠄⠄⠭⠸⠛⠼⠴⠛⠼⠴⠣⠜⠘⠺⠄⠀⠘⠾⠸⠛⠾⠬⠛⠾⠬⠛⠀
-⠁⠁⠀⠅⠜⠨⠦⠨⠿⠄⠉⠏⠉⠹⠀⠀⠀⠀⠀⠀⠀⠀⠨⠙⠙⠙⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠇⠜⠄⠄⠍⠸⠿⠮⠔⠿⠮⠔⠿⠣⠜⠘⠻⠄⠀⠘⠿⠸⠛⠮⠔⠛⠮⠔⠛
-⠁⠉⠀⠅⠜⠨⠦⠨⠯⠄⠉⠕⠉⠺⠀⠀⠀⠀⠀⠀⠀⠀⠦⠨⠑⠉⠦⠙⠉⠦⠚⠀
-⠀⠀⠀⠇⠜⠄⠄⠍⠸⠿⠾⠬⠿⠾⠬⠿⠣⠜⠘⠺⠄⠀⠘⠾⠸⠛⠾⠬⠛⠾⠬⠛
-⠁⠑⠀⠅⠜⠐⠾⠄⠉⠎⠪⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠨⠙⠉⠚⠉⠓⠀⠀⠀⠀
-⠀⠀⠀⠇⠜⠄⠄⠍⠸⠿⠮⠔⠿⠮⠔⠿⠣⠜⠘⠻⠄⠀⠘⠿⠸⠛⠮⠔⠛⠮⠔⠛
-⠁⠛⠀⠅⠜⠐⠷⠄⠉⠟⠻⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠨⠽⠄⠉⠕⠉⠙⠙⠀⠀⠀
-⠀⠀⠀⠇⠜⠄⠄⠍⠸⠿⠾⠬⠿⠾⠬⠿⠣⠜⠘⠺⠄⠀⠜⠍⠋⠸⠋⠓⠬⠼⠓⠬⠼
-⠁⠊⠀⠅⠜⠨⠿⠴⠍⠹⠬⠔⠀⠀⠀⠀⠀⠀⠀⠨⠵⠄⠉⠏⠉⠑⠑⠀⠀⠡⠨⠷⠴⠍⠱⠬⠔⠀⠀⠀
-⠀⠀⠀⠇⠜⠄⠄⠭⠸⠊⠬⠊⠬⠣⠜⠸⠻⠄⠀⠣⠸⠓⠊⠬⠼⠊⠬⠼⠀⠭⠸⠚⠬⠚⠬⠣⠜⠸⠳⠄
-⠃⠃⠀⠅⠜⠨⠿⠄⠉⠗⠉⠛⠛⠀⠜⠋⠋⠨⠳⠴⠛⠀⠦⠨⠯⠦⠿⠦⠯⠵⠍⠽⠍⠀⠀
-⠀⠀⠀⠇⠜⠸⠊⠙⠬⠼⠙⠬⠼⠀⠸⠺⠄⠬⠀⠀⠀⠀⠸⠯⠬⠴⠍⠿⠼⠴⠍⠿⠬⠒⠍
-⠃⠑⠀⠅⠜⠐⠺⠜⠍⠋⠨⠿⠄⠉⠰⠟⠀⠰⠻⠨⠿⠄⠉⠰⠟⠣⠜⠧⠄⠀
-⠀⠀⠀⠇⠜⠸⠚⠬⠚⠬⠭⠀⠀⠀⠀⠀⠀⠭⠸⠛⠬⠔⠭⠣⠜⠸⠻⠄⠬⠔
-⠃⠛⠀⠅⠜⠰⠻⠨⠿⠄⠉⠰⠟⠀⠀⠀⠀⠀⠀⠰⠯⠿⠯⠦⠵⠍⠦⠽⠍⠀⠀⠀
-⠀⠀⠀⠇⠜⠄⠄⠭⠸⠚⠬⠭⠣⠜⠸⠺⠄⠬⠀⠸⠯⠬⠴⠍⠿⠼⠴⠍⠿⠬⠒⠍
-⠃⠊⠀⠅⠜⠨⠺⠜⠋⠨⠿⠄⠉⠰⠟⠀⠀⠀⠰⠯⠉⠨⠮⠉⠰⠿⠉⠋⠨⠿⠄⠉⠰⠟⠣⠜⠧⠄
-⠀⠀⠀⠇⠜⠘⠾⠸⠿⠼⠴⠛⠼⠴⠛⠼⠴⠀⠭⠸⠛⠬⠒⠛⠬⠒⠣⠜⠘⠻⠄⠀⠀⠀⠀⠀⠀⠀
-⠉⠁⠀⠅⠜⠰⠵⠉⠨⠿⠉⠰⠿⠉⠑⠨⠿⠄⠉⠰⠟
-⠀⠀⠀⠇⠜⠄⠄⠭⠸⠛⠼⠴⠛⠼⠴⠣⠜⠘⠻⠄⠀
-⠉⠃⠀⠅⠜⠰⠃⠆⠰⠯⠨⠮⠰⠿⠯⠨⠮⠰⠿⠯⠨⠮⠰⠿⠀⠨⠚⠘⠆⠭⠩⠛
-⠀⠀⠀⠇⠜⠘⠛⠸⠛⠔⠒⠛⠔⠒⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠚⠬⠧⠀⠀⠀
-⠉⠙⠀⠅⠜⠄⠜⠋⠋⠰⠃⠨⠦⠨⠮⠄⠗⠿⠄⠏⠵⠄⠝⠀⠐⠾⠘⠆⠍⠜⠋⠋⠋⠨⠚⠼⠴⠭⠣⠅
-⠀⠀⠀⠇⠜⠄⠄⠄⠧⠸⠛⠬⠒⠣⠜⠸⠫⠄⠬⠴⠀⠀⠀⠀⠸⠾⠬⠍⠘⠚⠬⠔⠭⠣⠅⠀⠀⠀⠀⠀
+⠀⠁⠀⠨⠜⠄⠜⠁⠇⠇⠑⠛⠗⠑⠞⠞⠕⠜⠋⠄⠍⠀⠦⠨⠑⠦⠑⠦⠑⠀⠀
+⠀⠀⠀⠸⠜⠘⠚⠸⠛⠼⠴⠛⠼⠴⠀⠀⠀⠀⠀⠀⠀⠀⠘⠚⠸⠛⠼⠴⠛⠼⠴
+⠀⠉⠀⠨⠜⠨⠦⠨⠿⠄⠉⠏⠉⠹⠀⠀⠀⠀⠀⠀⠀⠨⠙⠙⠙⠀⠀⠀⠀⠀
+⠀⠀⠀⠸⠜⠄⠄⠭⠸⠛⠬⠒⠛⠬⠒⠣⠜⠘⠻⠄⠀⠘⠛⠸⠛⠬⠒⠛⠬⠒
+⠀⠑⠀⠨⠜⠨⠦⠨⠯⠄⠉⠕⠉⠺⠀⠀⠀⠀⠀⠀⠀⠦⠨⠑⠦⠙⠦⠚⠀⠀
+⠀⠀⠀⠸⠜⠄⠄⠭⠸⠛⠼⠴⠛⠼⠴⠣⠜⠘⠻⠄⠀⠘⠛⠸⠛⠼⠴⠛⠼⠴
+⠀⠛⠀⠨⠜⠐⠾⠄⠉⠎⠪⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠨⠙⠉⠚⠉⠓⠀⠀⠀
+⠀⠀⠀⠸⠜⠄⠄⠭⠸⠛⠔⠒⠛⠔⠒⠣⠜⠘⠻⠄⠀⠘⠛⠸⠛⠔⠒⠛⠔⠒
+⠀⠊⠀⠨⠜⠐⠷⠄⠉⠟⠻⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠜⠋⠋⠄⠦⠨⠑⠦⠑⠦⠑
+⠀⠀⠀⠸⠜⠄⠄⠭⠸⠛⠼⠴⠛⠼⠴⠣⠜⠘⠺⠄⠀⠘⠾⠸⠛⠾⠬⠛⠾⠬⠛⠀
+⠁⠁⠀⠨⠜⠨⠦⠨⠿⠄⠉⠏⠉⠹⠀⠀⠀⠀⠀⠀⠀⠀⠨⠙⠙⠙⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠸⠜⠄⠄⠍⠸⠿⠮⠔⠿⠮⠔⠿⠣⠜⠘⠻⠄⠀⠘⠿⠸⠛⠮⠔⠛⠮⠔⠛
+⠁⠉⠀⠨⠜⠨⠦⠨⠯⠄⠉⠕⠉⠺⠀⠀⠀⠀⠀⠀⠀⠀⠦⠨⠑⠉⠦⠙⠉⠦⠚⠀
+⠀⠀⠀⠸⠜⠄⠄⠍⠸⠿⠾⠬⠿⠾⠬⠿⠣⠜⠘⠺⠄⠀⠘⠾⠸⠛⠾⠬⠛⠾⠬⠛
+⠁⠑⠀⠨⠜⠐⠾⠄⠉⠎⠪⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠨⠙⠉⠚⠉⠓⠀⠀⠀⠀
+⠀⠀⠀⠸⠜⠄⠄⠍⠸⠿⠮⠔⠿⠮⠔⠿⠣⠜⠘⠻⠄⠀⠘⠿⠸⠛⠮⠔⠛⠮⠔⠛
+⠁⠛⠀⠨⠜⠐⠷⠄⠉⠟⠻⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠨⠽⠄⠉⠕⠉⠙⠙⠀⠀⠀
+⠀⠀⠀⠸⠜⠄⠄⠍⠸⠿⠾⠬⠿⠾⠬⠿⠣⠜⠘⠺⠄⠀⠜⠍⠋⠸⠋⠓⠬⠼⠓⠬⠼
+⠁⠊⠀⠨⠜⠨⠿⠴⠍⠹⠬⠔⠀⠀⠀⠀⠀⠀⠀⠨⠵⠄⠉⠏⠉⠑⠑⠀⠀⠡⠨⠷⠴⠍⠱⠬⠔⠀⠀⠀
+⠀⠀⠀⠸⠜⠄⠄⠭⠸⠊⠬⠊⠬⠣⠜⠸⠻⠄⠀⠣⠸⠓⠊⠬⠼⠊⠬⠼⠀⠭⠸⠚⠬⠚⠬⠣⠜⠸⠳⠄
+⠃⠃⠀⠨⠜⠨⠿⠄⠉⠗⠉⠛⠛⠀⠜⠋⠋⠨⠳⠴⠛⠀⠦⠨⠯⠦⠿⠦⠯⠵⠍⠽⠍⠀⠀
+⠀⠀⠀⠸⠜⠸⠊⠙⠬⠼⠙⠬⠼⠀⠸⠺⠄⠬⠀⠀⠀⠀⠸⠯⠬⠴⠍⠿⠼⠴⠍⠿⠬⠒⠍
+⠃⠑⠀⠨⠜⠐⠺⠜⠍⠋⠨⠿⠄⠉⠰⠟⠀⠰⠻⠨⠿⠄⠉⠰⠟⠣⠜⠧⠄⠀
+⠀⠀⠀⠸⠜⠸⠚⠬⠚⠬⠭⠀⠀⠀⠀⠀⠀⠭⠸⠛⠬⠔⠭⠣⠜⠸⠻⠄⠬⠔
+⠃⠛⠀⠨⠜⠰⠻⠨⠿⠄⠉⠰⠟⠀⠀⠀⠀⠀⠀⠰⠯⠿⠯⠦⠵⠍⠦⠽⠍⠀⠀⠀
+⠀⠀⠀⠸⠜⠄⠄⠭⠸⠚⠬⠭⠣⠜⠸⠺⠄⠬⠀⠸⠯⠬⠴⠍⠿⠼⠴⠍⠿⠬⠒⠍
+⠃⠊⠀⠨⠜⠨⠺⠜⠋⠨⠿⠄⠉⠰⠟⠀⠀⠀⠰⠯⠉⠨⠮⠉⠰⠿⠉⠋⠨⠿⠄⠉⠰⠟⠣⠜⠧⠄
+⠀⠀⠀⠸⠜⠘⠾⠸⠿⠼⠴⠛⠼⠴⠛⠼⠴⠀⠭⠸⠛⠬⠒⠛⠬⠒⠣⠜⠘⠻⠄⠀⠀⠀⠀⠀⠀⠀
+⠉⠁⠀⠨⠜⠰⠵⠉⠨⠿⠉⠰⠿⠉⠑⠨⠿⠄⠉⠰⠟
+⠀⠀⠀⠸⠜⠄⠄⠭⠸⠛⠼⠴⠛⠼⠴⠣⠜⠘⠻⠄⠀
+⠉⠃⠀⠨⠜⠰⠃⠆⠰⠯⠨⠮⠰⠿⠯⠨⠮⠰⠿⠯⠨⠮⠰⠿⠀⠨⠚⠘⠆⠭⠩⠛
+⠀⠀⠀⠸⠜⠘⠛⠸⠛⠔⠒⠛⠔⠒⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠚⠬⠧⠀⠀⠀
+⠉⠙⠀⠨⠜⠄⠜⠋⠋⠰⠃⠨⠦⠨⠮⠄⠗⠿⠄⠏⠵⠄⠝⠀⠐⠾⠘⠆⠍⠜⠋⠋⠋⠨⠚⠼⠴⠭⠣⠅
+⠀⠀⠀⠸⠜⠄⠄⠄⠧⠸⠛⠬⠒⠣⠜⠸⠫⠄⠬⠴⠀⠀⠀⠀⠸⠾⠬⠍⠘⠚⠬⠔⠭⠣⠅⠀⠀⠀⠀⠀
 
 
 The exposition to movement 1 of Mozart's K545.
 
 
->>> from music21 import corpus
->>> mozart = corpus.parse('k545')
+>>> #_DOCS_SHOW mozart = converter.parse('mozart_k545_exposition.xml')
 >>> #_DOCS_SHOW mozart.show('braille')
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠼⠙⠲⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠁⠀⠅⠜⠄⠜⠁⠇⠇⠑⠛⠗⠕⠨⠝⠫⠳⠀⠐⠺⠄⠉⠽⠉⠵⠹⠧⠀⠨⠎⠳⠰⠹⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠇⠜⠐⠙⠓⠋⠓⠙⠓⠋⠓⠀⠀⠀⠀⠀⠐⠑⠓⠛⠓⠙⠓⠋⠓⠀⠐⠙⠐⠊⠛⠊⠐⠙⠓⠋⠓
-⠀⠙⠀⠅⠜⠨⠳⠛⠉⠯⠉⠿⠫⠧⠀⠀⠐⠊⠾⠽⠵⠋⠛⠓⠮⠓⠛⠋⠵⠙⠚⠊
-⠀⠀⠀⠇⠜⠸⠚⠐⠓⠑⠓⠙⠓⠋⠓⠀⠐⠻⠧⠧⠸⠻⠔⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠋⠀⠅⠜⠐⠓⠮⠾⠽⠑⠋⠛⠷⠛⠋⠑⠽⠚⠊⠓⠀⠐⠛⠷⠮⠾⠙⠑⠋⠿⠋⠑⠙⠾⠊⠓⠛
-⠀⠀⠀⠇⠜⠸⠫⠴⠧⠧⠫⠴⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠱⠴⠧⠧⠱⠴⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠓⠀⠅⠜⠐⠋⠿⠷⠮⠚⠙⠑⠯⠑⠙⠚⠮⠓⠛⠋⠀⠐⠑⠯⠿⠷⠊⠚⠩⠙⠵⠐⠊⠚⠙⠵⠋⠛⠓
-⠀⠀⠀⠇⠜⠸⠹⠤⠧⠧⠹⠬⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠿⠬⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠁⠚⠀⠅⠜⠨⠮⠚⠙⠚⠮⠓⠛⠋⠿⠓⠊⠓⠿⠋⠑⠙
-⠀⠀⠀⠇⠜⠸⠻⠄⠓⠪⠄⠩⠛⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠁⠁⠀⠅⠜⠐⠚⠨⠓⠋⠙⠑⠓⠋⠙⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠨⠱⠳⠼⠴⠐⠳⠧⠣⠅
-⠀⠀⠀⠇⠜⠘⠷⠚⠑⠓⠘⠷⠸⠙⠋⠓⠘⠷⠚⠑⠓⠘⠷⠸⠙⠋⠓⠀⠘⠳⠸⠳⠘⠳⠧⠣⠅⠀
+⠀⠁⠀⠨⠜⠄⠜⠁⠇⠇⠑⠛⠗⠕⠨⠝⠫⠳⠀⠐⠺⠄⠉⠽⠉⠵⠹⠧⠀⠨⠎⠳⠰⠹⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠸⠜⠐⠙⠓⠋⠓⠙⠓⠋⠓⠀⠀⠀⠀⠀⠐⠑⠓⠛⠓⠙⠓⠋⠓⠀⠐⠙⠐⠊⠛⠊⠐⠙⠓⠋⠓
+⠀⠙⠀⠨⠜⠨⠳⠛⠉⠯⠉⠿⠫⠧⠀⠀⠐⠊⠾⠽⠵⠋⠛⠓⠮⠓⠛⠋⠵⠙⠚⠊
+⠀⠀⠀⠸⠜⠸⠚⠐⠓⠑⠓⠙⠓⠋⠓⠀⠐⠻⠧⠧⠸⠻⠔⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠋⠀⠨⠜⠐⠓⠮⠾⠽⠑⠋⠛⠷⠛⠋⠑⠽⠚⠊⠓⠀⠐⠛⠷⠮⠾⠙⠑⠋⠿⠋⠑⠙⠾⠊⠓⠛
+⠀⠀⠀⠸⠜⠸⠫⠴⠧⠧⠫⠴⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠱⠴⠧⠧⠱⠴⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠓⠀⠨⠜⠐⠋⠿⠷⠮⠚⠙⠑⠯⠑⠙⠚⠮⠓⠛⠋⠀⠐⠑⠯⠿⠷⠊⠚⠩⠙⠵⠐⠊⠚⠙⠵⠋⠛⠓
+⠀⠀⠀⠸⠜⠸⠹⠤⠧⠧⠹⠬⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠿⠬⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠁⠚⠀⠨⠜⠨⠮⠚⠙⠚⠮⠓⠛⠋⠿⠓⠊⠓⠿⠋⠑⠙
+⠀⠀⠀⠸⠜⠸⠻⠄⠓⠪⠄⠩⠛⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠁⠁⠀⠨⠜⠐⠚⠨⠓⠋⠙⠑⠓⠋⠙⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠨⠱⠳⠼⠴⠐⠳⠧⠣⠅
+⠀⠀⠀⠸⠜⠘⠷⠚⠑⠓⠘⠷⠸⠙⠋⠓⠘⠷⠚⠑⠓⠘⠷⠸⠙⠋⠓⠀⠘⠳⠸⠳⠘⠳⠧⠣⠅⠀
 
 
-#_OMIT_FROM_DOCS
 
->>> from music21.braille import translate
->>> print(translate.objectToBraille(hb, debug=True))
----begin segment---
+
+>>> print(braille.translate.objectToBraille(verdi.measures(1, 3), debug=True))
+---begin grand segment---
+<music21.braille.segment BrailleGrandSegment>
+===
+Measure 1 Right, Signature Grouping 1:
+Key Signature 2 flat(s) ⠣⠣
+Time Signature 3/8 ⠼⠉⠦
+<BLANKLINE>
+Measure 1 Left, Signature Grouping 1:
+B- major
+<music21.meter.TimeSignature 3/8>
+====
+Measure 1 Right, Note Grouping 1:
+<music21.clef.TrebleClef>
+Word ⠜
+Text Expression Allegretto ⠁⠇⠇⠑⠛⠗⠑⠞⠞⠕
+Word: ⠜
+Dynamic f ⠋
+Dot 3 ⠄
+Rest whole ⠍
+<BLANKLINE>
+Measure 1 Left, Note Grouping 1:
+<music21.clef.BassClef>
+Octave 2 ⠘
+B eighth ⠚
+Ascending Chord:
+Octave 3 ⠸
+F eighth ⠛
+Interval 4 ⠼
+Interval 6 ⠴
+Ascending Chord:
+F eighth ⠛
+Interval 4 ⠼
+Interval 6 ⠴
+====
+Measure 2 Right, Note Grouping 1:
+Articulation staccato ⠦
+Octave 5 ⠨
+D eighth ⠑
+Articulation staccato ⠦
+D eighth ⠑
+Articulation staccato ⠦
+D eighth ⠑
+<BLANKLINE>
+Measure 2 Left, Note Grouping 1:
+Octave 2 ⠘
+B eighth ⠚
+Ascending Chord:
+Octave 3 ⠸
+F eighth ⠛
+Interval 4 ⠼
+Interval 6 ⠴
+Ascending Chord:
+F eighth ⠛
+Interval 4 ⠼
+Interval 6 ⠴
+====
+Measure 3 Right, Note Grouping 1:
+Articulation accent ⠨⠦
+Octave 5 ⠨
+F 16th ⠿
+Dot ⠄
+Opening single slur ⠉
+E 32nd ⠏
+Opening single slur ⠉
+C quarter ⠹
+<BLANKLINE>
+Measure 3 Left, Inaccord Grouping 1:
+Rest eighth ⠭
+Ascending Chord:
+Octave 3 ⠸
+F eighth ⠛
+Interval 3 ⠬
+Interval 7 ⠒
+Ascending Chord:
+F eighth ⠛
+Interval 3 ⠬
+Interval 7 ⠒
+Octave 2 ⠘
+F quarter ⠻
+Dot ⠄
+====
+<BLANKLINE>
+---end grand segment---
+
+"""
+
+import unittest
+
+from music21 import key
+from music21 import note
+from music21 import tempo
+from music21 import converter
+
+def cp(strIn):
+    return converter.parse(strIn, makeNotation=False)
+
+def happyBirthday():
+    '''
+    fully copyright free!
+    '''
+    hb = cp("tinynotation: 3/4 d8. d16 e4 d g f#2 d8. d16 e4 d a g2 d8. " +
+            "d16 d'4 b g8. g16 f#4 e c'8. c'16 b4 g a g2")
+    hb.insert(0, key.KeySignature(1))
+    hb.insert(0, tempo.TempoText("Brightly"))
+    hb.insert(0, tempo.MetronomeMark(number=120, referent=note.Note(type='quarter')))
+    hb.makeNotation(inPlace=True, cautionaryNotImmediateRepeat=False)
+    return hb
+
+#-------------------------------------------------------------------------------
+class Test(unittest.TestCase):
+
+    def runTest(self):
+        pass
+
+    def testHappyBirthdayDebug(self):
+        from music21.braille.translate import objectToBraille
+        hb = happyBirthday()
+        x = objectToBraille(hb, debug=True)
+        y = u'''---begin segment---
 <music21.braille.segment BrailleSegment>
 Measure 1, Signature Grouping 1:
 Key Signature 1 sharp(s) ⠩
@@ -156,18 +271,24 @@ G half ⠗
 Barline final ⠣⠅
 ===
 ---end segment---
+'''
+        self.assertEqual(x.splitlines(), y.splitlines())
 
-
->>> print(translate.objectToBraille(verdi.measures(1, 3), debug=True))
----begin grand segment---
+    def testVerdiDebug(self):
+        #self.maxDiff = None
+        from music21 import corpus
+        from music21.braille.translate import objectToBraille
+        verdi = corpus.parse('verdi/laDonnaEMobile')
+        x = objectToBraille(verdi, debug=True)
+        y = u'''---begin grand segment---
 <music21.braille.segment BrailleGrandSegment>
 ===
 Measure 1 Right, Signature Grouping 1:
 Key Signature 2 flat(s) ⠣⠣
 Time Signature 3/8 ⠼⠉⠦
-<BLANKLINE>
+
 Measure 1 Left, Signature Grouping 1:
-<music21.key.KeySignature of 2 flats, mode major>
+B- major
 <music21.meter.TimeSignature 3/8>
 ====
 Measure 1 Right, Note Grouping 1:
@@ -178,7 +299,7 @@ Word: ⠜
 Dynamic f ⠋
 Dot 3 ⠄
 Rest whole ⠍
-<BLANKLINE>
+
 Measure 1 Left, Note Grouping 1:
 <music21.clef.BassClef>
 Octave 2 ⠘
@@ -201,7 +322,7 @@ Articulation staccato ⠦
 D eighth ⠑
 Articulation staccato ⠦
 D eighth ⠑
-<BLANKLINE>
+
 Measure 2 Left, Note Grouping 1:
 Octave 2 ⠘
 B eighth ⠚
@@ -224,93 +345,7 @@ Opening single slur ⠉
 E 32nd ⠏
 Opening single slur ⠉
 C quarter ⠹
-<BLANKLINE>
-Measure 3 Left, Inaccord Grouping 1:
-Rest eighth ⠭
-Ascending Chord:
-Octave 3 ⠸
-F eighth ⠛
-Interval 3 ⠬
-Interval 7 ⠒
-Ascending Chord:
-F eighth ⠛
-Interval 3 ⠬
-Interval 7 ⠒
-Octave 2 ⠘
-F quarter ⠻
-Dot ⠄
-====
-<BLANKLINE>
----end grand segment---
 
-
->>> print(translate.objectToBraille(verdi, debug=True))
----begin grand segment---
-<music21.braille.segment BrailleGrandSegment>
-===
-Measure 1 Right, Signature Grouping 1:
-Key Signature 2 flat(s) ⠣⠣
-Time Signature 3/8 ⠼⠉⠦
-<BLANKLINE>
-Measure 1 Left, Signature Grouping 1:
-<music21.key.KeySignature of 2 flats, mode major>
-<music21.meter.TimeSignature 3/8>
-====
-Measure 1 Right, Note Grouping 1:
-<music21.clef.TrebleClef>
-Word ⠜
-Text Expression Allegretto ⠁⠇⠇⠑⠛⠗⠑⠞⠞⠕
-Word: ⠜
-Dynamic f ⠋
-Dot 3 ⠄
-Rest whole ⠍
-<BLANKLINE>
-Measure 1 Left, Note Grouping 1:
-<music21.clef.BassClef>
-Octave 2 ⠘
-B eighth ⠚
-Ascending Chord:
-Octave 3 ⠸
-F eighth ⠛
-Interval 4 ⠼
-Interval 6 ⠴
-Ascending Chord:
-F eighth ⠛
-Interval 4 ⠼
-Interval 6 ⠴
-====
-Measure 2 Right, Note Grouping 1:
-Articulation staccato ⠦
-Octave 5 ⠨
-D eighth ⠑
-Articulation staccato ⠦
-D eighth ⠑
-Articulation staccato ⠦
-D eighth ⠑
-<BLANKLINE>
-Measure 2 Left, Note Grouping 1:
-Octave 2 ⠘
-B eighth ⠚
-Ascending Chord:
-Octave 3 ⠸
-F eighth ⠛
-Interval 4 ⠼
-Interval 6 ⠴
-Ascending Chord:
-F eighth ⠛
-Interval 4 ⠼
-Interval 6 ⠴
-====
-Measure 3 Right, Note Grouping 1:
-Articulation accent ⠨⠦
-Octave 5 ⠨
-F 16th ⠿
-Dot ⠄
-Opening single slur ⠉
-E 32nd ⠏
-Opening single slur ⠉
-C quarter ⠹
-<BLANKLINE>
 Measure 3 Left, Inaccord Grouping 1:
 Rest eighth ⠭
 Ascending Chord:
@@ -331,7 +366,7 @@ Octave 5 ⠨
 C eighth ⠙
 C eighth ⠙
 C eighth ⠙
-<BLANKLINE>
+
 Measure 4 Left, Note Grouping 1:
 Octave 2 ⠘
 F eighth ⠛
@@ -354,7 +389,7 @@ Opening single slur ⠉
 D 32nd ⠕
 Opening single slur ⠉
 B quarter ⠺
-<BLANKLINE>
+
 Measure 5 Left, Inaccord Grouping 1:
 Rest eighth ⠭
 Ascending Chord:
@@ -378,7 +413,7 @@ Articulation staccato ⠦
 C eighth ⠙
 Articulation staccato ⠦
 B eighth ⠚
-<BLANKLINE>
+
 Measure 6 Left, Note Grouping 1:
 Octave 2 ⠘
 F eighth ⠛
@@ -394,13 +429,13 @@ Interval 6 ⠴
 ====
 Measure 7 Right, Note Grouping 1:
 Octave 5 ⠨
-C eighth ⠙
+C eighth Gracenote--not supported ⠙
 B 16th ⠾
 Dot ⠄
 Opening single slur ⠉
 A 32nd ⠎
 A quarter ⠪
-<BLANKLINE>
+
 Measure 7 Left, Inaccord Grouping 1:
 Rest eighth ⠭
 Ascending Chord:
@@ -423,7 +458,7 @@ Opening single slur ⠉
 B eighth ⠚
 Opening single slur ⠉
 G eighth ⠓
-<BLANKLINE>
+
 Measure 8 Left, Note Grouping 1:
 Octave 2 ⠘
 F eighth ⠛
@@ -439,13 +474,13 @@ Interval 7 ⠒
 ====
 Measure 9 Right, Note Grouping 1:
 Octave 4 ⠐
-A eighth ⠊
+A eighth Gracenote--not supported ⠊
 G 16th ⠷
 Dot ⠄
 Opening single slur ⠉
 F 32nd ⠟
 F quarter ⠻
-<BLANKLINE>
+
 Measure 9 Left, Inaccord Grouping 1:
 Rest eighth ⠭
 Ascending Chord:
@@ -472,7 +507,7 @@ Articulation staccato ⠦
 D eighth ⠑
 Articulation staccato ⠦
 D eighth ⠑
-<BLANKLINE>
+
 Measure 10 Left, Note Grouping 1:
 Octave 2 ⠘
 B 16th ⠾
@@ -496,7 +531,7 @@ Opening single slur ⠉
 E 32nd ⠏
 Opening single slur ⠉
 C quarter ⠹
-<BLANKLINE>
+
 Measure 11 Left, Inaccord Grouping 1:
 Rest 16th ⠍
 Octave 3 ⠸
@@ -518,7 +553,7 @@ Octave 5 ⠨
 C eighth ⠙
 C eighth ⠙
 C eighth ⠙
-<BLANKLINE>
+
 Measure 12 Left, Note Grouping 1:
 Octave 2 ⠘
 F 16th ⠿
@@ -542,7 +577,7 @@ Opening single slur ⠉
 D 32nd ⠕
 Opening single slur ⠉
 B quarter ⠺
-<BLANKLINE>
+
 Measure 13 Left, Inaccord Grouping 1:
 Rest 16th ⠍
 Octave 3 ⠸
@@ -569,7 +604,7 @@ C eighth ⠙
 Opening single slur ⠉
 Articulation staccato ⠦
 B eighth ⠚
-<BLANKLINE>
+
 Measure 14 Left, Note Grouping 1:
 Octave 2 ⠘
 B 16th ⠾
@@ -586,13 +621,13 @@ F beam ⠛
 ====
 Measure 15 Right, Note Grouping 1:
 Octave 5 ⠨
-C eighth ⠙
+C eighth Gracenote--not supported ⠙
 B 16th ⠾
 Dot ⠄
 Opening single slur ⠉
 A 32nd ⠎
 A quarter ⠪
-<BLANKLINE>
+
 Measure 15 Left, Inaccord Grouping 1:
 Rest 16th ⠍
 Octave 3 ⠸
@@ -616,7 +651,7 @@ Opening single slur ⠉
 B eighth ⠚
 Opening single slur ⠉
 G eighth ⠓
-<BLANKLINE>
+
 Measure 16 Left, Note Grouping 1:
 Octave 2 ⠘
 F 16th ⠿
@@ -633,13 +668,13 @@ F beam ⠛
 ====
 Measure 17 Right, Note Grouping 1:
 Octave 4 ⠐
-A eighth ⠊
+A eighth Gracenote--not supported ⠊
 G 16th ⠷
 Dot ⠄
 Opening single slur ⠉
 F 32nd ⠟
 F quarter ⠻
-<BLANKLINE>
+
 Measure 17 Left, Inaccord Grouping 1:
 Rest 16th ⠍
 Octave 3 ⠸
@@ -665,7 +700,7 @@ D 32nd ⠕
 Opening single slur ⠉
 C eighth ⠙
 C eighth ⠙
-<BLANKLINE>
+
 Measure 18 Left, Note Grouping 1:
 Word: ⠜
 Dynamic mf ⠍⠋
@@ -683,7 +718,7 @@ Interval 4 ⠼
 Measure 19 Right, Note Grouping 1:
 Accidental natural ⠡
 Octave 5 ⠨
-E eighth ⠋
+E eighth Gracenote--not supported ⠋
 Descending Chord:
 F 16th ⠿
 Interval 6 ⠴
@@ -692,7 +727,7 @@ Descending Chord:
 C quarter ⠹
 Interval 3 ⠬
 Interval 5 ⠔
-<BLANKLINE>
+
 Measure 19 Left, Inaccord Grouping 1:
 Rest eighth ⠭
 Ascending Chord:
@@ -715,7 +750,7 @@ E 32nd ⠏
 Opening single slur ⠉
 D eighth ⠑
 D eighth ⠑
-<BLANKLINE>
+
 Measure 20 Left, Note Grouping 1:
 Accidental flat ⠣
 Octave 3 ⠸
@@ -732,7 +767,7 @@ Interval 4 ⠼
 Measure 21 Right, Note Grouping 1:
 Accidental flat ⠣
 Octave 5 ⠨
-G eighth ⠓
+G eighth Gracenote--not supported ⠓
 Descending Chord:
 Accidental natural ⠡
 G 16th ⠷
@@ -742,7 +777,7 @@ Descending Chord:
 D quarter ⠱
 Interval 3 ⠬
 Interval 5 ⠔
-<BLANKLINE>
+
 Measure 21 Left, Inaccord Grouping 1:
 Rest eighth ⠭
 Ascending Chord:
@@ -765,7 +800,7 @@ G 32nd ⠗
 Opening single slur ⠉
 F eighth ⠛
 F eighth ⠛
-<BLANKLINE>
+
 Measure 22 Left, Note Grouping 1:
 Octave 3 ⠸
 A eighth ⠊
@@ -786,7 +821,7 @@ Octave 5 ⠨
 G quarter ⠳
 Interval 6 ⠴
 F eighth ⠛
-<BLANKLINE>
+
 Measure 23 Left, Note Grouping 1:
 Ascending Chord:
 Octave 3 ⠸
@@ -795,6 +830,7 @@ Dot ⠄
 Interval 3 ⠬
 ====
 Measure 24 Right, Note Grouping 1:
+Triplet ⠆
 Articulation staccato ⠦
 Octave 5 ⠨
 E 16th ⠯
@@ -806,7 +842,7 @@ D 16th ⠵
 Rest 16th ⠍
 C 16th ⠽
 Rest 16th ⠍
-<BLANKLINE>
+
 Measure 24 Left, Note Grouping 1:
 Ascending Chord:
 Octave 3 ⠸
@@ -836,7 +872,7 @@ Dot ⠄
 Opening single slur ⠉
 Octave 6 ⠰
 F 32nd ⠟
-<BLANKLINE>
+
 Measure 25 Left, Note Grouping 1:
 Ascending Chord:
 Octave 3 ⠸
@@ -858,7 +894,7 @@ Octave 6 ⠰
 F 32nd ⠟
 Rest quarter ⠧
 Dot ⠄
-<BLANKLINE>
+
 Measure 26 Left, Inaccord Grouping 1:
 Rest eighth ⠭
 Ascending Chord:
@@ -883,7 +919,7 @@ Dot ⠄
 Opening single slur ⠉
 Octave 6 ⠰
 F 32nd ⠟
-<BLANKLINE>
+
 Measure 27 Left, Inaccord Grouping 1:
 Rest eighth ⠭
 Ascending Chord:
@@ -898,6 +934,7 @@ Dot ⠄
 Interval 3 ⠬
 ====
 Measure 28 Right, Note Grouping 1:
+Triplet ⠆
 Octave 6 ⠰
 E 16th ⠯
 F 16th ⠿
@@ -908,7 +945,7 @@ Rest 16th ⠍
 Articulation staccato ⠦
 C 16th ⠽
 Rest 16th ⠍
-<BLANKLINE>
+
 Measure 28 Left, Note Grouping 1:
 Ascending Chord:
 Octave 3 ⠸
@@ -938,7 +975,7 @@ Dot ⠄
 Opening single slur ⠉
 Octave 6 ⠰
 F 32nd ⠟
-<BLANKLINE>
+
 Measure 29 Left, Note Grouping 1:
 Octave 2 ⠘
 B 16th ⠾
@@ -975,7 +1012,7 @@ Octave 6 ⠰
 F 32nd ⠟
 Rest quarter ⠧
 Dot ⠄
-<BLANKLINE>
+
 Measure 30 Left, Inaccord Grouping 1:
 Rest eighth ⠭
 Ascending Chord:
@@ -1008,7 +1045,7 @@ Dot ⠄
 Opening single slur ⠉
 Octave 6 ⠰
 F 32nd ⠟
-<BLANKLINE>
+
 Measure 31 Left, Inaccord Grouping 1:
 Rest eighth ⠭
 Ascending Chord:
@@ -1033,17 +1070,19 @@ Octave 5 ⠨
 A 16th ⠮
 Octave 6 ⠰
 F 16th ⠿
+Triplet ⠆
 E 16th ⠯
 Octave 5 ⠨
 A 16th ⠮
 Octave 6 ⠰
 F 16th ⠿
+Triplet ⠆
 E 16th ⠯
 Octave 5 ⠨
 A 16th ⠮
 Octave 6 ⠰
 F 16th ⠿
-<BLANKLINE>
+
 Measure 32 Left, Note Grouping 1:
 Octave 2 ⠘
 F eighth ⠛
@@ -1064,7 +1103,7 @@ Closing bracket slur ⠘⠆
 Rest eighth ⠭
 Accidental sharp ⠩
 F eighth ⠛
-<BLANKLINE>
+
 Measure 33 Left, Note Grouping 1:
 Ascending Chord:
 Octave 3 ⠸
@@ -1087,7 +1126,7 @@ E 32nd ⠏
 D 16th ⠵
 Dot ⠄
 C 32nd ⠝
-<BLANKLINE>
+
 Measure 34 Left, Inaccord Grouping 1:
 Rest quarter ⠧
 Ascending Chord:
@@ -1116,7 +1155,7 @@ Interval 4 ⠼
 Interval 6 ⠴
 Rest eighth ⠭
 Barline final ⠣⠅
-<BLANKLINE>
+
 Measure 35 Left, Note Grouping 1:
 Ascending Chord:
 Octave 3 ⠸
@@ -1131,366 +1170,15 @@ Interval 5 ⠔
 Rest eighth ⠭
 Barline final ⠣⠅
 ====
-<BLANKLINE>
+
 ---end grand segment---
-
-
->>> print(translate.objectToBraille(mozart, debug=True))
----begin grand segment---
-<music21.braille.segment BrailleGrandSegment>
-===
-Measure 1 Right, Signature Grouping 1:
-Key Signature 0 flat(s) 
-Time Signature 4/4 ⠼⠙⠲
-<BLANKLINE>
-Measure 1 Left, Signature Grouping 1:
-<music21.key.KeySignature of no sharps or flats, mode major>
-<music21.meter.TimeSignature 4/4>
-====
-Measure 1 Right, Note Grouping 1:
-<music21.clef.TrebleClef>
-Word ⠜
-Text Expression Allegro ⠁⠇⠇⠑⠛⠗⠕
-Octave 5 ⠨
-C half ⠝
-E quarter ⠫
-G quarter ⠳
-<BLANKLINE>
-Measure 1 Left, Note Grouping 1:
-<music21.clef.TrebleClef>
-Octave 4 ⠐
-C eighth ⠙
-G eighth ⠓
-E eighth ⠋
-G eighth ⠓
-C eighth ⠙
-G eighth ⠓
-E eighth ⠋
-G eighth ⠓
-====
-Measure 2 Right, Note Grouping 1:
-Octave 4 ⠐
-B quarter ⠺
-Dot ⠄
-Opening single slur ⠉
-C 16th ⠽
-Opening single slur ⠉
-D 16th ⠵
-C quarter ⠹
-Rest quarter ⠧
-<BLANKLINE>
-Measure 2 Left, Note Grouping 1:
-Octave 4 ⠐
-D eighth ⠑
-G eighth ⠓
-F eighth ⠛
-G eighth ⠓
-C eighth ⠙
-G eighth ⠓
-E eighth ⠋
-G eighth ⠓
-====
-Measure 3 Right, Note Grouping 1:
-Octave 5 ⠨
-A half ⠎
-G quarter ⠳
-Octave 6 ⠰
-C quarter ⠹
-<BLANKLINE>
-Measure 3 Left, Note Grouping 1:
-Octave 4 ⠐
-C eighth ⠙
-Octave 4 ⠐
-A eighth ⠊
-F eighth ⠛
-A eighth ⠊
-Octave 4 ⠐
-C eighth ⠙
-G eighth ⠓
-E eighth ⠋
-G eighth ⠓
-====
-Measure 4 Right, Note Grouping 1:
-Octave 5 ⠨
-G quarter ⠳
-F eighth ⠛
-Opening single slur ⠉
-E 16th ⠯
-Opening single slur ⠉
-F 16th ⠿
-E quarter ⠫
-Rest quarter ⠧
-<BLANKLINE>
-Measure 4 Left, Note Grouping 1:
-Octave 3 ⠸
-B eighth ⠚
-Octave 4 ⠐
-G eighth ⠓
-D eighth ⠑
-G eighth ⠓
-C eighth ⠙
-G eighth ⠓
-E eighth ⠋
-G eighth ⠓
-====
-Measure 5 Right, Note Grouping 1:
-Octave 4 ⠐
-A eighth ⠊
-B 16th ⠾
-C 16th ⠽
-D 16th ⠵
-E beam ⠋
-F beam ⠛
-G beam ⠓
-A 16th ⠮
-G beam ⠓
-F beam ⠛
-E beam ⠋
-D 16th ⠵
-C beam ⠙
-B beam ⠚
-A beam ⠊
-<BLANKLINE>
-Measure 5 Left, Note Grouping 1:
-<music21.clef.BassClef>
-Octave 4 ⠐
-F quarter ⠻
-Rest quarter ⠧
-Rest quarter ⠧
-Ascending Chord:
-Octave 3 ⠸
-F quarter ⠻
-Interval 5 ⠔
-====
-Measure 6 Right, Note Grouping 1:
-Octave 4 ⠐
-G eighth ⠓
-A 16th ⠮
-B 16th ⠾
-C 16th ⠽
-D beam ⠑
-E beam ⠋
-F beam ⠛
-G 16th ⠷
-F beam ⠛
-E beam ⠋
-D beam ⠑
-C 16th ⠽
-B beam ⠚
-A beam ⠊
-G beam ⠓
-<BLANKLINE>
-Measure 6 Left, Note Grouping 1:
-Ascending Chord:
-Octave 3 ⠸
-E quarter ⠫
-Interval 6 ⠴
-Rest quarter ⠧
-Rest quarter ⠧
-Ascending Chord:
-E quarter ⠫
-Interval 6 ⠴
-====
-Measure 7 Right, Note Grouping 1:
-Octave 4 ⠐
-F eighth ⠛
-G 16th ⠷
-A 16th ⠮
-B 16th ⠾
-C beam ⠙
-D beam ⠑
-E beam ⠋
-F 16th ⠿
-E beam ⠋
-D beam ⠑
-C beam ⠙
-B 16th ⠾
-A beam ⠊
-G beam ⠓
-F beam ⠛
-<BLANKLINE>
-Measure 7 Left, Note Grouping 1:
-Ascending Chord:
-Octave 3 ⠸
-D quarter ⠱
-Interval 6 ⠴
-Rest quarter ⠧
-Rest quarter ⠧
-Ascending Chord:
-D quarter ⠱
-Interval 6 ⠴
-====
-Measure 8 Right, Note Grouping 1:
-Octave 4 ⠐
-E eighth ⠋
-F 16th ⠿
-G 16th ⠷
-A 16th ⠮
-B beam ⠚
-C beam ⠙
-D beam ⠑
-E 16th ⠯
-D beam ⠑
-C beam ⠙
-B beam ⠚
-A 16th ⠮
-G beam ⠓
-F beam ⠛
-E beam ⠋
-<BLANKLINE>
-Measure 8 Left, Note Grouping 1:
-Ascending Chord:
-Octave 3 ⠸
-C quarter ⠹
-Interval 8 ⠤
-Rest quarter ⠧
-Rest quarter ⠧
-Ascending Chord:
-C quarter ⠹
-Interval 3 ⠬
-====
-Measure 9 Right, Note Grouping 1:
-Octave 4 ⠐
-D eighth ⠑
-E 16th ⠯
-F 16th ⠿
-G 16th ⠷
-A beam ⠊
-B beam ⠚
-Accidental sharp ⠩
-C beam ⠙
-D 16th ⠵
-Octave 4 ⠐
-A beam ⠊
-B beam ⠚
-C beam ⠙
-D 16th ⠵
-E beam ⠋
-F beam ⠛
-G beam ⠓
-<BLANKLINE>
-Measure 9 Left, Note Grouping 1:
-Ascending Chord:
-Octave 3 ⠸
-F whole ⠿
-Interval 3 ⠬
-====
-Measure 10 Right, Note Grouping 1:
-Octave 5 ⠨
-A 16th ⠮
-B beam ⠚
-C beam ⠙
-B beam ⠚
-A 16th ⠮
-G beam ⠓
-F beam ⠛
-E beam ⠋
-F 16th ⠿
-G beam ⠓
-A beam ⠊
-G beam ⠓
-F 16th ⠿
-E beam ⠋
-D beam ⠑
-C beam ⠙
-<BLANKLINE>
-Measure 10 Left, Note Grouping 1:
-Octave 3 ⠸
-F quarter ⠻
-Dot ⠄
-G eighth ⠓
-A quarter ⠪
-Dot ⠄
-Accidental sharp ⠩
-F eighth ⠛
-====
-Measure 11 Right, Note Grouping 1:
-Octave 4 ⠐
-B eighth ⠚
-Octave 5 ⠨
-G eighth ⠓
-E eighth ⠋
-C eighth ⠙
-D eighth ⠑
-G eighth ⠓
-E eighth ⠋
-C eighth ⠙
-<BLANKLINE>
-Measure 11 Left, Note Grouping 1:
-Octave 2 ⠘
-G 16th ⠷
-B beam ⠚
-D beam ⠑
-G beam ⠓
-Octave 2 ⠘
-G 16th ⠷
-Octave 3 ⠸
-C beam ⠙
-E beam ⠋
-G beam ⠓
-Octave 2 ⠘
-G 16th ⠷
-B beam ⠚
-D beam ⠑
-G beam ⠓
-Octave 2 ⠘
-G 16th ⠷
-Octave 3 ⠸
-C beam ⠙
-E beam ⠋
-G beam ⠓
-====
-Measure 12 Right, Note Grouping 1:
-Octave 5 ⠨
-D quarter ⠱
-Descending Chord:
-G quarter ⠳
-Interval 4 ⠼
-Interval 6 ⠴
-Octave 4 ⠐
-G quarter ⠳
-Rest quarter ⠧
-Barline final ⠣⠅
-<BLANKLINE>
-Measure 12 Left, Note Grouping 1:
-Octave 2 ⠘
-G quarter ⠳
-Octave 3 ⠸
-G quarter ⠳
-Octave 2 ⠘
-G quarter ⠳
-Rest quarter ⠧
-Barline final ⠣⠅
-====
-<BLANKLINE>
----end grand segment---
-"""
-
-import unittest
-
-from music21 import key
-from music21 import note
-from music21 import tempo
-from music21 import tinyNotation
-
-def happyBirthday():
-    hb = tinyNotation.TinyNotationStream\
-        ("3/4 d8. d16 e4 d g f#2 d8. d16 e4 d a g2 d8. d16 d'4 b g8. g16 f#4 e c'8. c'16 b4 g a g2")
-    hb.insert(0, key.KeySignature(1))
-    hb.insert(0, tempo.TempoText("Brightly"))
-    hb.insert(0, tempo.MetronomeMark(number = 120, referent = note.Note(type='quarter')))
-    hb.makeNotation(inPlace=True, cautionaryNotImmediateRepeat=False)
-    return hb
-
-#-------------------------------------------------------------------------------
-class Test(unittest.TestCase):
-
-    def runTest(self):
-        pass
+'''
+        self.maxDiff = None
+        self.assertEqual(x.splitlines(), y.splitlines())
 
 if __name__ == "__main__":
     import music21
-    music21.mainTest(Test)
+    music21.mainTest(Test) #, runTest='testVerdiDebug')
 
 #------------------------------------------------------------------------------
 # eof

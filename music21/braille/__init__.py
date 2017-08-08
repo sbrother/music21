@@ -3,28 +3,22 @@
 __all__ = ['basic',
            'examples',
            'lookup',
+           'noteGrouping',
+           'objects',
            'segment',
            'test',
            'text',
            'translate']
-import sys
 
-if sys.version > '3':
-    from . import basic
-    from . import examples
-    from . import lookup
-    from . import segment
-    from . import test
-    from . import text
-    from . import translate
-else:          
-    import basic # @Reimport
-    import examples # @Reimport
-    import lookup # @Reimport
-    import segment # @Reimport
-    import test # @Reimport
-    import text # @Reimport
-    import translate # @Reimport
+from music21.braille import basic
+from music21.braille import examples
+from music21.braille import lookup
+from music21.braille import noteGrouping
+from music21.braille import objects
+from music21.braille import segment
+from music21.braille import test
+from music21.braille import text
+from music21.braille import translate
 
 #------------------------------------------------------------------------------
 # eof

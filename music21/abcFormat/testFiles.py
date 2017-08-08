@@ -10,6 +10,9 @@
 
 import unittest
 
+# some lines must be this long, because of sources.
+# pylint: disable=line-too-long
+
 
 # abc standard
 # http://abcnotation.com/abc2mtex/abc.txt
@@ -22,15 +25,15 @@ _DOC_IGNORE_MODULE_OR_PACKAGE = True
 
 
 # http://abcnotation.com/tunePage?a=www.folkwiki.se/pub/cache/_Fyrareprisarn_0bf5b5/0001
-fyrareprisarn = """
+fyrareprisarn = u"""
 %%abc-charset utf-8
 
 X: 1
 T: Fyrareprisarn
-O: JÃ¤t, SmÃ¥land
-S: efter August StrÃƒÂ¶mberg
-D: Svensson, Gustafsson mfl - BÃƒÂ¥lgetingen
-Z: Till abc av Jon Magnusson 100517 
+O: Jät, Småland
+S: efter August Strömberg
+D: Svensson, Gustafsson mfl - Bålgetingen
+Z: Till abc av Jon Magnusson 100517
 R: Hambo
 M: 3/4
 L: 1/8
@@ -242,7 +245,7 @@ sicutRosa = """X:1
 T:9v. Sicut rosa
 C:Orlando Lassusio
 O: Bicinia, sive Cantionis
-H: transcribed from the Musica Alamire facsimile of the original 
+H: transcribed from the Musica Alamire facsimile of the original
 H: printed in Antwerp by Petrum Phalesium, 1609
 %%gchordfont Helvetica 12 box
 %%MIDI nobarlines
@@ -262,7 +265,7 @@ _B2 A2 A4 D2 F2 E2 F2 G4 G3 A B2 A2 F2 c2 B2 c2 d2 c3 B d4 c B c A c4 B2 "B"c4 z
 w:- am vir- go Ma- ri- am pro- ge- - - ni- am Ma- ri- am pro- ge- - - - - - - - ni- am ger- mi- na- vit e-
 %4
 d2 e3 d/ c/ B c d A d3 c/ B/ c2 "C"d4-d4 z2 d2 e2 d3 B ^c2 d2 e2 c2 G A B c d2 G4 z2 G2
-w:nim flo- - - - - - - - - - - rem, * qui vi- ta- - -  lem dat o- do- - - - - rem qui 
+w:nim flo- - - - - - - - - - - rem, * qui vi- ta- - -  lem dat o- do- - - - - rem qui
 %5
 A2 G3 E ^F2 G2 A2 c4 B3 A/ G/ A4 HG4 |]
 w:vi- ta- - - lem dat o- do- - - - rem.
@@ -473,7 +476,7 @@ K:G
 
 AB|cdec BcdB|ABAF GFE2|cdec BcdB|c2A2 A2:|
 
-% comment line 
+% comment line
 
 E2E EFE|E2E EFG|\
 M:9/8
@@ -499,19 +502,57 @@ D3 D3 | D6 | D3 D3 | D6 ||
 testPrimitiveTuplet = """M:4/4
 K:E
 T:Test Tuplet Primitve
-(3.c=c^c (5ccc=cc (6ccccc=f (7Bcc^^c=cc^f 
+(3.c=c^c (5ccc=cc (6ccccc=f (7Bcc^^c=cc^f
 
-(3.c2=c2^c2 (3.c2=c2^c2 
+(3.c2=c2^c2 (3.c2=c2^c2
 
 (6c/c/c/c/c/=f/ (6B/c/c/^^c/c/^f/ z4
 
 """
 # (9Bc^C ^c=cc =Cc=f
 
+
+# abc-2.1 code + allowing shared header information.
+
+reelsABC21 = '''%abc-2.1
+M:4/4
+O:Irish
+R:Reel
+
+X:1
+T:Untitled Reel
+C:Trad.
+K:D
+eg|a2ab ageg|agbg agef|g2g2 fgag|f2d2 d2:|\
+ed|cecA B2ed|cAcA E2ed|cecA B2ed|c2A2 A2:|
+K:G
+AB|cdec BcdB|ABAF GFE2|cdec BcdB|c2A2 A2:|
+
+X:2
+T:Kitchen Girl
+C:Trad.
+K:D
+[c4a4] [B4g4]|efed c2cd|e2f2 gaba|g2e2 e2fg|
+a4 g4|efed cdef|g2d2 efed|c2A2 A4:|
+K:G
+ABcA BAGB|ABAG EDEG|A2AB c2d2|e3f edcB|ABcA BAGB|
+ABAG EGAB|cBAc BAG2|A4 A4:|
+'''
+
+sponge1613 = '''
+X:1
+T:Example 16-13
+L:1/4
+M:3/4
+K:F
+V:1
+fz((6:4F,//A,//C//F//A//c// e/d/)dz
+'''
+
 #-------------------------------------------------------------------------------
 
-ALL  = [fyrareprisarn, mysteryReel, fullRiggedShip, aleIsDear, kitchGirl, 
-        williamAndNancy, morrisonsJig, hectorTheHero, kingOfTheFairies, 
+ALL  = [fyrareprisarn, mysteryReel, fullRiggedShip, aleIsDear, kitchGirl,
+        williamAndNancy, morrisonsJig, hectorTheHero, kingOfTheFairies,
         sicutRosa, theAleWifesDaughter, theBeggerBoy, theBattleOfTheSnaBas,
 
         draughtOfAle,
@@ -539,20 +580,28 @@ class Test(unittest.TestCase):
     def testBasic(self):
         from music21 import abcFormat
         from music21.abcFormat import translate
-        from music21.musicxml import m21ToString
+        from music21.musicxml import m21ToXml
 
         af = abcFormat.ABCFile()
 
-        for tf in ALL:
+        GEX = m21ToXml.GeneralObjectExporter()
+
+        for i, tf in enumerate(ALL):
             ah = af.readstr(tf)
             environLocal.printDebug([ah.getTitle()])
             s = translate.abcToStreamScore(ah)
             # run musicxml processing to look for internal errors
-            unused_out = m21ToString.fromMusic21Object(s)
-
+            #print(repr(s.metadata._workIds['localeOfComposition']._data))
+            #print(s.metadata.all())
+            try:
+                unused_out = GEX.parse(s)
+            except UnicodeDecodeError as ude:
+                environLocal.warn("About to fail on ABC file #{}".format(i))
+                raise ude
 
 if __name__ == "__main__":
     import music21
+    #music21.converter.parse(reelsABC21, format='abc').scores[1].show()
     music21.mainTest(Test)
 
 

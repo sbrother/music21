@@ -6,8 +6,8 @@
 # Authors:      Christopher Ariza
 #               Michael Scott Cuthbert
 #
-# Copyright:    (c) 2011 The music21 Project
-# License:      LGPL
+# Copyright:    Copyright © 2011 Michael Scott Cuthbert and the music21 Project
+# License:      BSD or LGPL, see license.txt
 #-------------------------------------------------------------------------------
 
 import copy
@@ -52,7 +52,7 @@ def chordsToAnalysis(chordStream, manifest, scale):
         m.removeByClass(['GeneralNote'])
         # assuming we have measure numbers
 
-    for (measureNumber, chordNumberOrNone, scaleDegree, octaveDisplay,         
+    for (measureNumber, chordNumberOrNone, scaleDegree, octaveDisplay,
         durationTypeDisplay, textDisplay) in manifest:
         # assume measures are in order; replace with different method
         m = chordMeasures[measureNumber-1]
@@ -64,6 +64,7 @@ def chordsToAnalysis(chordStream, manifest, scale):
 
         pTarget = scale.pitchFromDegree(scaleDegree)
         match = False
+        p = None
         for p in c.pitches:
             if p.name == pTarget.name:
                 match = True
@@ -73,10 +74,10 @@ def chordsToAnalysis(chordStream, manifest, scale):
         pTarget.octave = octaveDisplay
         n = note.Note(pTarget)
         if durationTypeDisplay in ['whole']:
-            n.noteheadFill = 'no';
+            n.noteheadFill = False
         else:
-            n.noteheadFill = 'yes';
-        n.stemDirection = 'noStem';
+            n.noteheadFill = True
+        n.stemDirection = 'noStem'
         n.addLyric(textDisplay)
         mPost.insert(c.getOffsetBySite(m), n)
 
@@ -92,8 +93,7 @@ def chordsToAnalysis(chordStream, manifest, scale):
     return measureTemplate
 
 def exShenker():
-    import copy
-    from music21 import corpus, stream, scale, bar, layout
+    from music21 import stream, scale, bar
     # wtc no 1
     src = corpus.parse('bwv846')
     #src.show()
@@ -105,13 +105,15 @@ def exShenker():
         m.number = i + 1
 
     # this stream has triple bar lines, clefs, etc
-    chords = src.flat.makeChords(minimumWindowSize=2)
+    unused_chords = src.flat.makeChords(minimumWindowSize=2)
 
     analysis = stream.Score()
     chordReduction = copy.deepcopy(measureTemplate)
     for i, m in enumerate(chordReduction.getElementsByClass('Measure')):
-        mNotes = src.flat.getElementsByOffset(m.offset, 
-            m.offset+m.barDuration.quarterLength, includeEndBoundary=False)        
+        mNotes = src.flat.getElementsByOffset(
+            m.offset,
+            m.offset + m.barDuration.quarterLength,
+            includeEndBoundary=False)
         mNotes.makeChords(minimumWindowSize=4, inPlace=True)
         c = mNotes.flat.notes[0]
         c.duration.type = 'whole'
@@ -121,19 +123,19 @@ def exShenker():
 
     scaleCMajor = scale.MajorScale('c')
 
-    #measureNumber, chordNumberOrNone, scaleDegree, octaveDisplay,         
+    #measureNumber, chordNumberOrNone, scaleDegree, octaveDisplay,
     #    durationTypeDisplay, textDisplay
-    manifest = [(1, None, 3, 5, 'whole', '3'), 
-                (24, None, 2, 5, 'whole', '2'), 
-                (35, None, 1, 5, 'whole', '1'), 
+    manifest = [(1, None, 3, 5, 'whole', '3'),
+                (24, None, 2, 5, 'whole', '2'),
+                (35, None, 1, 5, 'whole', '1'),
                 ]
     analysis1 = chordsToAnalysis(chordReduction, manifest, scaleCMajor)
 
 
-    manifest = [(1, None, 1, 4, 'whole', 'I'), 
-                (24, None, 5, 3, 'whole', 'V'), 
-                (31, None, 4, 4, 'quarter', '--7'), 
-                (35, None, 1, 4, 'whole', 'I'), 
+    manifest = [(1, None, 1, 4, 'whole', 'I'),
+                (24, None, 5, 3, 'whole', 'V'),
+                (31, None, 4, 4, 'quarter', '--7'),
+                (35, None, 1, 4, 'whole', 'I'),
                ]
     analysis2 = chordsToAnalysis(chordReduction, manifest, scaleCMajor)
 
@@ -147,8 +149,6 @@ def exShenker():
 
 
 def demoMakeChords():
-    
-    from music21 import corpus, stream, scale, bar, layout
     # wtc no 1
     #src = corpus.parse('bwv65.2').measures(0, 5)
     src = corpus.parse('opus18no1/movement3.xml').measures(0, 10)

@@ -7,25 +7,30 @@
 # Authors:      Michael Scott Cuthbert
 #
 # Copyright:    Copyright © 2012 Michael Scott Cuthbert
-# License:      CC-BY (see http://stackoverflow.com/questions/12611337/recursively-dir-a-python-object-to-find-values-of-a-certain-type-or-with-a-cer)
+# License:      CC-BY (see StackOverflow link below)
 #-------------------------------------------------------------------------------
-import types
+# http://stackoverflow.com/questions/12611337/
+#     recursively-dir-a-python-object-to-find-values-of-a-certain-type-or-with-a-cer
+
+import sys
+if sys.version_info[0] >= 3:
+    unicode = str
 
 class TreeYielder(object):
-    def __init__(self, yieldValue = None):
+    def __init__(self, yieldValue=None):
         '''
         `yieldValue` should be a lambda function that
         returns True/False or a function/method call that
         will be passed the value of a current attribute
-        '''        
+        '''
         self.currentStack = []
+        self.memo = None
         self.yieldValue = yieldValue
         self.stackVals = []
-        t = types
-        self.nonIterables = [t.IntType, t.StringType, t.UnicodeType, t.LongType,
-                             t.FloatType, t.NoneType, t.BooleanType]
+        self.nonIterables = [int, str, unicode, # t.LongType,
+                             float, type(None), bool]
 
-    def run(self, obj, memo = None):
+    def run(self, obj, memo=None):
         '''
         traverse all attributes of an object looking
         for subObjects that meet a certain criteria.
@@ -56,7 +61,7 @@ class TreeYielder(object):
         tObj = type(obj)
         if tObj in self.nonIterables:
             pass
-        elif tObj == types.DictType:
+        elif tObj == dict:
             for keyX in obj:
                 dictTuple = ('dict', keyX)
                 self.stackVals.append(dictTuple)
@@ -65,7 +70,7 @@ class TreeYielder(object):
                     yield z
                 self.stackVals.pop()
 
-        elif tObj in [types.ListType, types.TupleType]:
+        elif tObj in [list, tuple]:
             for i,x in enumerate(obj):
                 listTuple = ('listLike', i)
                 self.stackVals.append(listTuple)
@@ -84,7 +89,7 @@ class TreeYielder(object):
             for x in instance_dict:
                 try:
                     gotValue = object.__getattribute__(obj, x)
-                except: # ?? property that relies on something else being set.
+                except Exception: # pylint: disable=broad-except
                     continue
                 objTuple = ('getattr', x)
                 self.stackVals.append(objTuple)
@@ -93,7 +98,7 @@ class TreeYielder(object):
                         yield z
                 except RuntimeError:
                     raise Exception("Maximum recursion on:\n%s" % self.currentLevel())
-                self.stackVals.pop()                
+                self.stackVals.pop()
 
         self.currentStack.pop()
 
@@ -114,42 +119,54 @@ class TreeYielder(object):
             else:
                 raise Exception("Cannot get attribute of type %s" % stackType)
         return currentStr
-    
-    
+
+
 def testCode():
     class Mock(object):
-        def __init__(self, mockThing, embedMock = True):
+        def __init__(self, mockThing, embedMock=True):
             self.abby = 30
             self.mocker = mockThing
             self.mockList = [mockThing, mockThing, 40]
             self.embeddedMock = None
             if embedMock is True:
-                self.embeddedMock = Mock(mockThing, embedMock = False)
-    
+                self.embeddedMock = Mock(mockThing, embedMock=False)
+
     mockType = lambda x: x.__class__.__name__ == 'Mock'
-    
+
     subList = [100, 60, -2]
-    myList = [5, 20, [5, 12, 17], 30, {'hello': 10, 'goodbye': 22, 'mock': Mock(subList)}, -20, Mock(subList)]
+    myList = [5, 20, [5, 12, 17], 30, 
+              {'hello': 10, 'goodbye': 22, 'mock': Mock(subList)}, -20, Mock(subList)]
     myList.append(myList)
-    
+
     ty = TreeYielder(mockType)
     for val in ty.run(myList):
         print(val, ty.currentLevel())
 
 def testMIDIParse():
-    from music21 import converter, corpus
+    from music21 import converter, common
     from music21 import freezeThaw
 
     #a = 'https://github.com/ELVIS-Project/vis/raw/master/test_corpus/prolationum-sanctus.midi'
     #c = converter.parse(a)
-    c = corpus.parse('bwv66.6', forceSource=True)
+#     c = corpus.parse('bwv66.6', forceSource=True)
+#     v = freezeThaw.StreamFreezer(c)
+#     v.setupSerializationScaffold()
+#     return v.writeStr() # returns a string
+    import os
+    a = os.path.join(common.getSourceFilePath(),
+                     'midi',
+                     'testPrimitive',
+                     'test03.mid')
+
+    #a = 'https://github.com/ELVIS-Project/vis/raw/master/test_corpus/prolationum-sanctus.midi'
+    c = converter.parse(a)
     v = freezeThaw.StreamFreezer(c)
     v.setupSerializationScaffold()
-    return v.writeStr() # returns a string
+
 
     mockType = lambda x: x.__class__.__name__ == 'weakref'
     ty = TreeYielder(mockType)
-    for val in ty.run(v):
+    for val in ty.run(c):
         print(val, ty.currentLevel())
 
 
@@ -157,3 +174,4 @@ if __name__ == "__main__":
     pass
     #testCode()
     testMIDIParse()
+

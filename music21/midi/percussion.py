@@ -6,40 +6,39 @@
 # Authors:      Michael Scott Cuthbert
 #               Ben Houge
 #
-# Copyright:    Copyright © 2012 Michael Scott Cuthbert and the music21 Project
+# Copyright:    Copyright © 2012, 2017 Michael Scott Cuthbert and the music21 Project
 # License:      LGPL or BSD, see license.txt
 #-------------------------------------------------------------------------------
+import unittest
+import copy
 
 from music21 import pitch
 from music21 import exceptions21
 from music21 import instrument
-
-import unittest
-import copy
 
 class MIDIPercussionException(exceptions21.Music21Exception):
     pass
 
 class PercussionMapper(object):
     '''
-    PercussionMapper provides tools to convert between MIDI notes and music21 instruments, 
+    PercussionMapper provides tools to convert between MIDI notes and music21 instruments,
     based on the official General MIDI Level 1 Percussion Key Map.
     This mapping is conventionally applied to MIDI channel 10;
     see http://www.midi.org/techspecs/gm1sound.php for more info.
-    
+
     Give me the instrument that corresponds to MIDI note 58!
-    
-    
+
+
     >>> pm = midi.percussion.PercussionMapper()
     >>> pm.reverseInstrumentMapping[58]
     <class 'music21.instrument.Vibraslap'>
-    
+
     That's right, vibraslap.
 
     But you're better off using the midiPitchToInstrument() method below!
-    
+
     '''
-    
+
     i = instrument
     reverseInstrumentMapping = {35: i.BassDrum, #Acoustic Bass Drum
                                 36: i.BassDrum, #Bass Drum 1
@@ -90,103 +89,105 @@ class PercussionMapper(object):
                                 81: i.Triangle} #Open Triangle
 
     # MIDI percussion mappings from http://www.midi.org/techspecs/gm1sound.php
-    
+
     def midiPitchToInstrument(self, midiPitch):
         '''
-        Takes a pitch.Pitch object or int and returns the corresponding instrument in the GM Percussion Map.
-        
-        
+        Takes a pitch.Pitch object or int and returns the corresponding
+        instrument in the GM Percussion Map.
+
+
         >>> pm = midi.percussion.PercussionMapper()
         >>> cowPitch = pitch.Pitch(56)
         >>> cowbell = pm.midiPitchToInstrument(cowPitch)
         >>> cowbell
-        <music21.instrument.Instrument Cowbell>
-        
+        <music21.instrument.Cowbell Cowbell>
+
         Or it can just take an integer (representing MIDI note) for the pitch instead...
-        
+
         >>> moreCowbell = pm.midiPitchToInstrument(56)
         >>> moreCowbell
-        <music21.instrument.Instrument Cowbell>
-        
+        <music21.instrument.Cowbell Cowbell>
+
         The standard GM Percussion list goes from 35 to 81;
         pitches outside this range raise an exception.
-        
+
         >>> bassDrum1Pitch = pitch.Pitch('B-1')
         >>> pm.midiPitchToInstrument(bassDrum1Pitch)
         Traceback (most recent call last):
-        MIDIPercussionException: 34 doesn't map to a valid instrument!
-        
-        Also, certain GM instruments do not have corresponding music21 instruments, 
+        music21.midi.percussion.MIDIPercussionException: 34 doesn't map to a valid instrument!
+
+        Also, certain GM instruments do not have corresponding music21 instruments,
         so at present they also raise an exception.
-        
+
         >>> cabasaPitch = 69
         >>> pm.midiPitchToInstrument(cabasaPitch)
         Traceback (most recent call last):
-        MIDIPercussionException: 69 doesn't map to a valid instrument!
+        music21.midi.percussion.MIDIPercussionException: 69 doesn't map to a valid instrument!
 
 
         Some music21 Instruments have more than one MidiPitch.  In this case you'll
         get the same Instrument object but with a different modifier
-        
+
         >>> acousticBassDrumPitch = pitch.Pitch(35)
         >>> acousticBDInstrument = pm.midiPitchToInstrument(acousticBassDrumPitch)
         >>> acousticBDInstrument
-        <music21.instrument.Instrument Bass Drum>
+        <music21.instrument.BassDrum Bass Drum>
         >>> acousticBDInstrument.modifier
         'acoustic'
-        
+
         >>> oneBassDrumPitch = pitch.Pitch(36)
         >>> oneBDInstrument = pm.midiPitchToInstrument(oneBassDrumPitch)
         >>> oneBDInstrument
-        <music21.instrument.Instrument Bass Drum>
+        <music21.instrument.BassDrum Bass Drum>
         >>> oneBDInstrument.modifier
         '1'
-        
+
         '''
-        
-        if type(midiPitch) == int:
+
+        if isinstance(midiPitch, int):
             midiNumber = midiPitch
         else:
             midiNumber = midiPitch.midi
         if midiNumber not in self.reverseInstrumentMapping:
             raise MIDIPercussionException("%r doesn't map to a valid instrument!" % midiNumber)
         midiInstrument = self.reverseInstrumentMapping[midiNumber]
-        
+
         midiInstrumentObject = midiInstrument()
-        if midiInstrumentObject.inGMPercMap is True and hasattr(midiInstrumentObject, '_percMapPitchToModifier'):
+        if (midiInstrumentObject.inGMPercMap is True
+                and hasattr(midiInstrumentObject, '_percMapPitchToModifier')):
             if midiNumber in midiInstrumentObject._percMapPitchToModifier:
                 modifier = midiInstrumentObject._percMapPitchToModifier[midiNumber]
                 midiInstrumentObject.modifier = modifier
-        
+
         return midiInstrumentObject
-    
+
     def midiInstrumentToPitch(self, midiInstrument):
         '''
         Takes an instrument.Instrument object and returns a pitch object
         with the corresponding MIDI note, according to the GM Percussion Map.
-        
-        
+
+
         >>> pm = midi.percussion.PercussionMapper()
         >>> myCow = instrument.Cowbell()
         >>> cowPitch = pm.midiInstrumentToPitch(myCow)
         >>> cowPitch.midi
         56
-        
+
         Note that cowPitch is an actual pitch.Pitch object
         even though it's meaningless!
-        
+
         >>> cowPitch
         <music21.pitch.Pitch G#3>
-        
+
         If the instrument does not have an equivalent in the GM Percussion Map,
         return an Exception:
-        
+
         >>> myBagpipes = instrument.Bagpipes()
         >>> pipePitch = pm.midiInstrumentToPitch(myBagpipes)
         Traceback (most recent call last):
-        MIDIPercussionException: <music21.instrument.Instrument Bagpipes> is not in the GM Percussion Map!
+        music21.midi.percussion.MIDIPercussionException: <music21.instrument.Bagpipes Bagpipes>
+            is not in the GM Percussion Map!
         '''
-        
         if not hasattr(midiInstrument, 'inGMPercMap') or midiInstrument.inGMPercMap is False:
             raise MIDIPercussionException("%r is not in the GM Percussion Map!" % midiInstrument)
         midiPitch = midiInstrument.percMapPitch
@@ -197,7 +198,7 @@ class PercussionMapper(object):
     _DOC_ORDER = [midiInstrumentToPitch, midiPitchToInstrument]
 
 class Test(unittest.TestCase):
-    
+
     def runTest(self):
         pass
 
@@ -215,7 +216,7 @@ class Test(unittest.TestCase):
                 continue
             name = getattr(sys.modules[self.__module__], part)
             if callable(name) and not isinstance(name, types.FunctionType):
-                try: # see if obj can be made w/ args
+                try: # see if obj can be made w/o any args
                     obj = name()
                 except TypeError:
                     continue

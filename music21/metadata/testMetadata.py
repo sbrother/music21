@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import re
 import unittest
 from music21 import freezeThaw
@@ -12,14 +13,11 @@ class Test(unittest.TestCase):
         pass
 
     def testMetadataLoadCorpus(self):
-        from music21.musicxml import xmlHandler
+        from music21 import converter
         from music21.musicxml import testFiles as mTF
-        from music21.musicxml import fromMxObjects
 
-        document = xmlHandler.Document()
-        document.read(mTF.mozartTrioK581Excerpt)  # @UndefinedVariable
-        mxScore = document.score  # get the mx score directly
-        md = fromMxObjects.mxScoreToMetadata(mxScore)
+        c = converter.parse(mTF.mozartTrioK581Excerpt)  # @UndefinedVariable
+        md = c.metadata
 
         self.assertEqual(md.movementNumber, '3')
         self.assertEqual(
@@ -29,15 +27,13 @@ class Test(unittest.TestCase):
         # get contributors directly from Metadata interface
         self.assertEqual(md.composer, 'Wolfgang Amadeus Mozart')
 
-        document.read(mTF.binchoisMagnificat)  # @UndefinedVariable
-        mxScore = document.score  # get the mx score directly
-        md = fromMxObjects.mxScoreToMetadata(mxScore)
+        c = converter.parse(mTF.binchoisMagnificat)  # @UndefinedVariable
+        md = c.metadata
         self.assertEqual(md.composer, 'Gilles Binchois')
 
     def testJSONSerializationMetadata(self):
-        from music21.musicxml import xmlHandler
-        from music21.musicxml import fromMxObjects
-        from music21.musicxml import testFiles
+        from music21 import converter
+        from music21.musicxml import testFiles as mTF
         from music21 import metadata
 
         md = metadata.Metadata(
@@ -61,12 +57,8 @@ class Test(unittest.TestCase):
         self.assertEqual(mdNew.title, 'Concerto in F')
 
         # test getting meta data from an imported source
-
-        d = xmlHandler.Document()
-        d.read(testFiles.mozartTrioK581Excerpt)  # @UndefinedVariable
-        mxScore = d.score  # get the mx score directly
-
-        md = fromMxObjects.mxScoreToMetadata(mxScore)
+        c = converter.parse(mTF.mozartTrioK581Excerpt)  # @UndefinedVariable
+        md = c.metadata
 
         self.assertEqual(md.movementNumber, '3')
         self.assertEqual(
@@ -105,7 +97,7 @@ class Test(unittest.TestCase):
 
         self.assertEqual(
             richMetadata.keySignatureFirst,
-            '<music21.key.KeySignature of 1 flat, mode major>',
+            '<music21.key.Key of F major>',
             )
 
         self.assertEqual(str(richMetadata.timeSignatureFirst), '2/4')
@@ -120,7 +112,7 @@ class Test(unittest.TestCase):
         self.assertEqual(str(rmdNew.timeSignatureFirst), '2/4')
         self.assertEqual(
             str(rmdNew.keySignatureFirst),
-            '<music21.key.KeySignature of 1 flat, mode major>',
+            '<music21.key.Key of F major>',
             )
 
         score = corpus.parse('bwv66.6')
@@ -130,7 +122,7 @@ class Test(unittest.TestCase):
         richMetadata.update(score)
         self.assertEqual(
             str(richMetadata.keySignatureFirst),
-            '<music21.key.KeySignature of 3 sharps, mode minor>',
+            '<music21.key.Key of f# minor>',
             )
         self.assertEqual(str(richMetadata.timeSignatureFirst), '4/4')
 
@@ -140,7 +132,7 @@ class Test(unittest.TestCase):
         self.assertEqual(str(rmdNew.timeSignatureFirst), '4/4')
         self.assertEqual(
             str(rmdNew.keySignatureFirst),
-            '<music21.key.KeySignature of 3 sharps, mode minor>',
+            '<music21.key.Key of f# minor>',
             )
 
     def testWorkIds(self):
@@ -201,7 +193,6 @@ class Test(unittest.TestCase):
             test.dedent('''
                 {
                     "__attr__": {
-                        "_contributors": [],
                         "_urls": [],
                         "_workIds": {
                             "movementName": {
@@ -218,14 +209,17 @@ class Test(unittest.TestCase):
                             },
                             "__class__": "music21.interval.Interval"
                         },
-                        "keySignatureFirst": "<music21.key.KeySignature of 3 sharps, mode minor>",
+                        "contributors": [],
+                        "keySignatureFirst": "<music21.key.Key of f# minor>",
                         "keySignatures": [
-                            "<music21.key.KeySignature of 3 sharps, mode minor>"
+                            "<music21.key.Key of f# minor>"
                         ],
                         "noteCount": 165,
+                        "numberOfParts": 4,
                         "pitchHighest": "E5",
                         "pitchLowest": "F#2",
                         "quarterLength": 36.0,
+                        "sourcePath": "bach/bwv66.6.mxl",
                         "tempos": [],
                         "timeSignatureFirst": "4/4",
                         "timeSignatures": [
