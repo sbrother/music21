@@ -4400,6 +4400,7 @@ class MeasureParser(XMLParserBase):
 
         # attr: symbol
         symbol = mxTime.get('symbol')
+        ts.uuid = mxTime.get('uuid')
         if symbol:
             if symbol in ('common', 'cut', 'single-number', 'normal'):
                 ts.symbol = symbol
@@ -4468,6 +4469,7 @@ class MeasureParser(XMLParserBase):
 
         # number is taken care of by insertCoreAndReference
 
+        clefObj.uuid = mxClef.get('uuid')
         # TODO: additional -- is this clef an additional clef to ignore...
         # TODO: size
         # TODO: after-barline -- particular style to clef.
@@ -4528,6 +4530,8 @@ class MeasureParser(XMLParserBase):
                         ks = ks.asKey(modeValue)
                     except exceptions21.Music21Exception:
                         pass # mxKeyMode might not be a valid mode -- in which case ignore...
+
+        ks.uuid = mxKey.get('uuid')
         self.mxKeyOctaves(mxKey, ks)
         # TODO: attr: number
         self.setPrintStyle(mxKey, ks)
